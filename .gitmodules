@@ -1,3 +1,12 @@
 [submodule "robot_lab"]
 	path = robot_lab
-	url = https://github.com/fan-ziqi/robot_lab
+	url = https://github.com/vet3whale/robot_lab.git
+	branch = b2w-rough-walking-robot-lab
+[submodule "unitree_rl_lab"]
+	path = unitree_rl_lab
+	url = https://github.com/vet3whale/unitree_rl_lab.git
+	branch = b2w-rough-walking-unitree-rl-lab
+[submodule "unitree_mujoco"]
+	path = unitree_mujoco
+	url = https://github.com/vet3whale/unitree_mujoco.git
+	branch = b2w-rough-walking-unitree-mujoco
