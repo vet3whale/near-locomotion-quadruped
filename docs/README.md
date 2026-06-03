@@ -16,47 +16,57 @@ The RL policy is trained in `robot_lab`, exported to ONNX via `play.py`, then th
 
 ## Table of Contents
 
-- [Repository Layout](#repository-layout)
-- [Environment Setup](#environment-setup)
-  - [System Container Was Tested On](#system-container-was-tested-on)
-  - [What the Container Downloads](#what-the-container-downloads)
-  - [Quick Start - Dev Container](#quick-start---dev-container)
-  - [Shell Functions](#shell-functions)
-  - [Reference - `--load_actor_only` flag](#reference---load_actor_only-flag)
-- [MuJoCo Sim2Sim Validation Setup](#mujoco-sim2sim-validation-setup)
-  - [Overview](#overview)
-  - [Code Changes Made](#code-changes-made)
-  - [Prerequisite Installation](#prerequisite-installation)
-  - [Check this before running sim2sim](#check-this-before-running-sim2sim)
-  - [Terrain Generation](#terrain-generation)
-  - [Switching to Gamepad](#switching-to-gamepad)
-- [Workflow](#workflow)
-  - [Step 1 - Train in Isaac Lab](#step-1---train-in-isaac-lab)
-  - [Step 1b - Watch the Robot Walk in Isaac Sim](#step-1b---watch-the-robot-walk-in-isaac-sim)
-  - [Step 2 - Export to ONNX](#step-2---export-to-onnx)
-  - [Step 3 - Sim2Sim in MuJoCo](#step-3---sim2sim-in-mujoco)
-  - [Step 3b - Generate rough terrain](#step-3b---generate-rough-terrain)
-- [Rough Terrain Curriculum Training on Isaac-Sim](#rough-terrain-curriculum-training-on-isaac-sim)
-  - [Training Command](#training-command)
-  - [Sub-Terrains](#sub-terrains)
-  - [Terrain Difficulty Curriculum](#terrain-difficulty-curriculum)
-  - [Implementing different terrain config (To be implemented)](#implementing-different-terrain-config-to-be-implemented)
-- [Skills Trained On](#skills-trained-on)
-  - [Successfully trained on](#successfully-trained-on)
-  - [What we want to train on next](#what-we-want-to-train-on-next)
-- [Deriving π in RL](#deriving-π-in-rl)
-  - [Defining Q-function](#defining-q-function)
-- [Proximal Policy Optimisation: PPO](#proximal-policy-optimisation-ppo)
-  - [The Combined PPO Loss](#the-combined-ppo-loss)
-  - [Clipped Surrogate Objective](#clipped-surrogate-objective)
-  - [Value (Critic) Loss](#value-critic-loss)
-  - [Entropy Bonus](#entropy-bonus)
-  - [Generalised Advantage Estimation (GAE)](#generalised-advantage-estimation-gae)
-  - [Adaptive KL-based learning-rate schedule](#adaptive-kl-based-learning-rate-schedule)
-  - [On-Policy data is used](#on-policy-data-is-used)
-  - [Applying the gradients](#applying-the-gradients)
-- [Code Walkthrough: train.py](#code-walkthrough-trainpy)
-  - [PPO](#ppo)
+<ul>
+  <li><a href="#repository-layout">Repository Layout</a></li>
+  <li><details><summary><a href="#environment-setup">Environment Setup</a></summary><ul>
+    <li><a href="#system-container-was-tested-on">System Container Was Tested On</a></li>
+    <li><a href="#what-the-container-downloads">What the Container Downloads</a></li>
+    <li><a href="#quick-start---dev-container">Quick Start - Dev Container</a></li>
+    <li><a href="#shell-functions">Shell Functions</a></li>
+    <li><a href="#reference---load_actor_only-flag">Reference - <code>--load_actor_only</code> flag</a></li>
+  </ul></details></li>
+  <li><details><summary><a href="#mujoco-sim2sim-validation-setup">MuJoCo Sim2Sim Validation Setup</a></summary><ul>
+    <li><a href="#overview">Overview</a></li>
+    <li><a href="#code-changes-made">Code Changes Made</a></li>
+    <li><a href="#prerequisite-installation">Prerequisite Installation</a></li>
+    <li><a href="#check-this-before-running-sim2sim">Check this before running sim2sim</a></li>
+    <li><a href="#terrain-generation">Terrain Generation</a></li>
+    <li><a href="#switching-to-gamepad">Switching to Gamepad</a></li>
+  </ul></details></li>
+  <li><details><summary><a href="#workflow">Workflow</a></summary><ul>
+    <li><a href="#step-1---train-in-isaac-lab">Step 1 - Train in Isaac Lab</a></li>
+    <li><a href="#step-1b---watch-the-robot-walk-in-isaac-sim">Step 1b - Watch the Robot Walk in Isaac Sim</a></li>
+    <li><a href="#step-2---export-to-onnx">Step 2 - Export to ONNX</a></li>
+    <li><a href="#step-3---sim2sim-in-mujoco">Step 3 - Sim2Sim in MuJoCo</a></li>
+    <li><a href="#step-3b---generate-rough-terrain">Step 3b - Generate rough terrain</a></li>
+  </ul></details></li>
+  <li><details><summary><a href="#rough-terrain-curriculum-training-on-isaac-sim">Rough Terrain Curriculum Training on Isaac-Sim</a></summary><ul>
+    <li><a href="#training-command">Training Command</a></li>
+    <li><a href="#sub-terrains">Sub-Terrains</a></li>
+    <li><a href="#terrain-difficulty-curriculum">Terrain Difficulty Curriculum</a></li>
+    <li><a href="#implementing-different-terrain-config-to-be-implemented">Implementing different terrain config (To be implemented)</a></li>
+  </ul></details></li>
+  <li><details><summary><a href="#skills-trained-on">Skills Trained On</a></summary><ul>
+    <li><a href="#successfully-trained-on">Successfully trained on</a></li>
+    <li><a href="#what-we-want-to-train-on-next">What we want to train on next</a></li>
+  </ul></details></li>
+  <li><details><summary><a href="#deriving-π-in-rl">Deriving π in RL</a></summary><ul>
+    <li><a href="#defining-q-function">Defining Q-function</a></li>
+  </ul></details></li>
+  <li><details><summary><a href="#proximal-policy-optimisation-ppo">Proximal Policy Optimisation: PPO</a></summary><ul>
+    <li><a href="#the-combined-ppo-loss">The Combined PPO Loss</a></li>
+    <li><a href="#clipped-surrogate-objective">Clipped Surrogate Objective</a></li>
+    <li><a href="#value-critic-loss">Value (Critic) Loss</a></li>
+    <li><a href="#entropy-bonus">Entropy Bonus</a></li>
+    <li><a href="#generalised-advantage-estimation-gae">Generalised Advantage Estimation (GAE)</a></li>
+    <li><a href="#adaptive-kl-based-learning-rate-schedule">Adaptive KL-based learning-rate schedule</a></li>
+    <li><a href="#on-policy-data-is-used">On-Policy data is used</a></li>
+    <li><a href="#applying-the-gradients">Applying the gradients</a></li>
+  </ul></details></li>
+  <li><details><summary><a href="#code-walkthrough-trainpy">Code Walkthrough: train.py</a></summary><ul>
+    <li><a href="#ppo">PPO</a></li>
+  </ul></details></li>
+</ul>
 
 ---
 ## Repository Layout
