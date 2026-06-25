@@ -41,12 +41,13 @@ RL policy trained in `robot_lab` --> exported to ONNX via `play.py` --> C++ cont
     <li><a href="#47-step-3b---generate-rough-terrain">4.7 Step 3b - Generate rough terrain</a></li>
     <li><a href="#48-step-4---sim2real-to-be-tested">4.8 Step 4 - Sim2Real (to be tested)</a></li>
   </ul></details></li>
-  <li><details><summary><a href="#5-rough-terrain-curriculum-training-on-isaac-sim">5. Rough Terrain Curriculum Training on Isaac-Sim</a></summary><ul>
+  <li><details><summary><a href="#5-curriculum-training-with-different-terrain">5. Curriculum Training with Different Terrain</a></summary><ul>
     <li><a href="#51-training-command">5.1 Training Command</a></li>
     <li><a href="#52-sub-terrains-the-default-mix">5.2 Sub-Terrains (the default mix)</a></li>
     <li><a href="#53-terrain-difficulty-curriculum">5.3 Terrain Difficulty Curriculum</a></li>
     <li><a href="#54-plug-in-a-different-terrain">5.4 Plug in a different terrain</a></li>
     <li><a href="#55-worked-example-staircaseup-teacher">5.5 Worked example: StaircaseUp teacher</a></li>
+    <li><a href="#56-multi-expert-terrain">5.6 Multi-Expert Terrain</a></li>
   </ul></details></li>
   <li><details><summary><a href="#6-evaluation-matrix">6. Evaluation Matrix</a></summary><ul>
     <li><a href="#61-command">6.1 Command</a></li>
@@ -62,6 +63,7 @@ RL policy trained in `robot_lab` --> exported to ONNX via `play.py` --> C++ cont
   <li><details><summary><a href="#8-b2w-config-verify-before-sim2real">8. B2W Config (Verify Before Sim2Real)</a></summary><ul>
     <li><a href="#81-source-of-truth---unitreepy">8.1 Source of Truth - unitree.py</a></li>
     <li><a href="#82-checklist---verify-before-sim2real">8.2 Checklist - Verify Before Sim2Real</a></li>
+    <li><a href="#83-dcmotor-speed-torque-matching-in-mujoco">8.3 DCMotor Speed-Torque Matching in MuJoCo</a></li>
   </ul></details></li>
   <li><details><summary><a href="#9-challenges-faced">9. Challenges Faced</a></summary><ul>
     <li><a href="#91-fixstand-wheel-skid---bug-that-passed-in-sim-but-failed-on-the-real-robot">9.1 FixStand wheel skid - bug that passed in sim but failed on the real robot</a></li>
@@ -93,6 +95,7 @@ RL policy trained in `robot_lab` --> exported to ONNX via `play.py` --> C++ cont
     <li><a href="#131-ppo">13.1 PPO</a></li>
     <li><a href="#132-distillation-mlp-student">13.2 Distillation (MLP Student)</a></li>
     <li><a href="#133-distillation-lstm-student">13.3 Distillation (LSTM Student)</a></li>
+    <li><a href="#134-multi-expert-distillation-lstm-student">13.4 Multi-Expert Distillation (LSTM Student)</a></li>
   </ul></details></li>
 </ul>
 
@@ -147,7 +150,7 @@ near-locomotion-quadruped/
 ### 2.1 System Container Was Tested On
 
 <details>
-<summary><strong>Click to expand 2.1 System Container Was Tested On table</strong></summary>
+<summary><strong>Containter was tested in the following system:</strong></summary>
 
 | Component | Spec |
 |---|---|
@@ -172,7 +175,7 @@ near-locomotion-quadruped/
 The Dockerfile pulls the following during `docker build`. Plan for a large first build (~30–40 GB total download).
 
 <details>
-<summary><strong>Click to expand table</strong></summary>
+<summary><strong>Container downloads the following:</strong></summary>
 
 | What | Source | Size (approx) |
 |---|---|---|
@@ -197,8 +200,9 @@ The repo ships a `.devcontainer/` at its root. Prerequisites:
 1. **Clone the repo with its submodules** (`robot_lab`, `unitree_mujoco`, `unitree_rl_lab`):
 
    ```bash
-   git clone <repo-url> near-locomotion-quadruped
+   git clone https://github.com/vet3whale/near-locomotion-quadruped.git
    cd near-locomotion-quadruped
+   git checkout b2w-distillation-training
    ```
 
 2. **Initialise the submodules** (skip if you already used `--recurse-submodules` on the clone):
@@ -212,8 +216,6 @@ The repo ships a `.devcontainer/` at its root. Prerequisites:
    ```bash
    git submodule update --recursive
    ```
-
-   > Steps 2–3 can be combined as `git submodule update --init --recursive`.
 
 4. **Open the folder in VS Code and build the dev container.** Open `.devcontainer/devcontainer.json` (or just the repo folder), then either:
    - click the **"Reopen in Container"** prompt VS Code shows, or
@@ -246,10 +248,13 @@ The dev container's `~/.bashrc` defines two functions. Call each once per termin
 
 | Function | When to call | What it does |
 |---|---|---|
-| `setup_isaaclab` | Before any Isaac Lab script (`train.py`, `play.py`) | Unsets `PYTHONPATH`, sources Isaac Sim's Python env, adds Isaac Lab + robot_lab packages to `PYTHONPATH`, and aliases `python`/`python3` to Python 3.11 |
-| `sim2sim_env` | Before running `unitree_mujoco` or `b2w_ctrl` | Unsets ROS env vars that would interfere with DDS, sets `LD_LIBRARY_PATH` for the controller's shared libs, and sets the `CYCLONEDDS_URI` to disable Iceoryx (loopback sim2sim) |
+| `setup_isaaclab` | Before `train.py`, `play.py` script (need Isaac Lab) | [See function definition](../../../isaac-sim/.bashrc#L134-L161) |
+| `sim2sim_env` | Before `unitree_mujoco` or `b2w_ctrl` | [See function definition](../../../isaac-sim/.bashrc#L165-L169) |
 
-### 2.5 Reference - `--load_actor_only` flag
+<details>
+<summary>Steps to load flat terrain policy to rough terrain environment:</summary>  
+
+`--load_actor_only` flag (Not necessary for distillation - for rough & flat terrain)
 
 To load a flat-terrain checkpoint into the rough-terrain task, you **must** pass `--load_actor_only`:
 
@@ -271,6 +276,7 @@ Without it, `runner.load` will crash. The reason is that the actor and critic ha
 
 The rough critic receives privileged observations, such as height scans, contact forces, terrain geometry, that flat critic doesn't need --> So never saw. 
 `play.py` still looks for critic's input, so by passing in `--load_actor_only`, only actor with 57 base observations is used.
+</details>
 
 ---
 
@@ -278,28 +284,30 @@ The rough critic receives privileged observations, such as height scans, contact
 
 This section explains how to set up Sim2Sim validation using MuJoCo.
 
-> **FSM states glossary** (the controller is a finite state machine; these names recur throughout Sections 3 and 4):
-> - **Passive** - motors limp, robot sits on the ground. The startup state.
-> - **FixStand** - holds a fixed standing pose with position PD (the stand-up state).
+> **FSM states glossary** (the controller is a finite state machine):
+> - **Passive** - motors limp, robot sits on the ground. startup state.
+> - **FixStand** - holds a fixed standing pose.
 > - **Velocity** - the RL policy is active and driving the robot from velocity commands.
-> - **SitDown** - graceful two-phase sit-down (damp, then interpolate) before returning to Passive.
+> - **SitDown** - two-phase sit-down (damp, then interpolate) before returning to Passive.
 
 ### 3.1 Overview
 
 **Training policy location** (auto-selected by `parser_policy_dir`):
 ```
-robot_lab/logs/rsl_rl/unitree_b2w_rough/<latest-timestamp>/
-  exported/policy.onnx ← not committed to github; run play.py first to export it
+robot_lab/logs/rsl_rl/unitree_b2w_multiexpert/<latest-timestamp>/exported/policy.onnx
 ```
 
-**IMPORTANT**: Set which policy the controller deploys (for sim2sim or sim2real) by opening `unitree_rl_lab/deploy/robots/b2w/config/config.yaml` and editing `policy_dir` to point at the log root of the run you want. `parser_policy_dir` function in controller then automatically finds the most recent timestamp subdirectory that contains an `exported/` folder and loads `policy.onnx` from it.  
+> **Note**: Run `play.py` to convert from `.pt` to `.onnx` format. 
 
-See [Step 2 - Export to ONNX](#44-step-2---export-to-onnx) for how to generate the ONNX file from a checkpoint using `play.py`.
+**IMPORTANT**: Set which policy the controller deploys (for sim2sim or sim2real) by opening `unitree_rl_lab/deploy/robots/b2w/config/config.yaml` and editing `policy_dir` to point at the log root of the run you want.   
+`parser_policy_dir` function in controller automatically finds most recent timestamp subdirectory that contains an `exported/` folder and loads `policy.onnx` from it.  
+See [Step 2 - Export to ONNX](#44-step-2---export-to-onnx) to generate `.onnx` file from a `.pt` checkpoint.
 
 **Shared deploy config** (loaded by the controller at startup): This is the yaml used when the robot is in Velocity state.
 ```
-unitree_rl_lab/deploy/robots/b2w/config/deploy.yaml  ← observation/action config (editable)
+unitree_rl_lab/deploy/robots/b2w/config/deploy.yaml  ← observation/action config
 ```
+> Note this has to follow Training damping and stiffness values. Refer to [section 8](#8-b2w-config-verify-before-sim2real).
 
 ### 3.2 Prerequisite Installation
 
@@ -322,12 +330,6 @@ mkdir build && cd build
 cmake .. -DCMAKE_INSTALL_PREFIX=/opt/unitree_robotics
 sudo make install
 ```
-
-> **Note:** Installing to `/opt/unitree_robotics` instead of `/usr/local` means the SDK headers
-> are not on GCC's default search path. The b2w `CMakeLists.txt` already accounts for this with
-> an explicit `include_directories(/opt/unitree_robotics/include)` and
-> `link_directories(/opt/unitree_robotics/lib)`. Other robots (b2, go2, etc.) would need the
-> same addition if built on this machine.
 
 #### 3. MuJoCo 3.3.6
 
@@ -377,7 +379,7 @@ Binary: `unitree_rl_lab/deploy/robots/b2w/build/b2w_ctrl` - [→ Run it](#run-tw
 #### `unitree_mujoco/simulate/config.yaml`
 
 ```yaml
-robot: "b2w"          # ← change from "go2"
+robot: "b2w"
 domain_id: 0
 interface: "lo"       # loopback for sim2sim
 use_joystick: 0       # 0 = no USB gamepad required (keyboard mode)
@@ -386,7 +388,6 @@ use_joystick: 0       # 0 = no USB gamepad required (keyboard mode)
 #### MJCF model
 
 Confirm `unitree_mujoco/unitree_robots/b2w/` exists and contains `b2w.xml`.
-If absent, obtain from the Unitree MuJoCo model pack.
 
 **Verified actuator order in b2w.xml** (matches training order - no permutation needed):
 ```
@@ -399,24 +400,22 @@ If absent, obtain from the Unitree MuJoCo model pack.
 
 #### ONNX policy file
 
-After training and play have run, your `policy.onnx` will be at:
+After training and play, `policy.onnx` will be at:
 
 ```
-/workspace/near-locomotion-quadruped/robot_lab/logs/rsl_rl/unitree_b2w_rough/<timestamp>/exported/
+/workspace/near-locomotion-quadruped/robot_lab/logs/rsl_rl/unitree_b2w_multiexpert/<timestamp>/exported/
 ```
 
-If you want, just check that `policy_dir` in
+Check that `policy_dir` in
 `unitree_rl_lab/deploy/robots/b2w/config/config.yaml` is correct:
 
 ```yaml
-    policy_dir: ../../../../robot_lab/logs/rsl_rl/unitree_b2w_rough
+policy_dir: ../../../../robot_lab/logs/rsl_rl/unitree_b2w_multiexpert
 ```
 
 ### 3.4 Terrain Generation
 
-The simulator ships with a flat ground scene (`scene.xml`) for each robot. Use the terrain
-generator tool to produce a `scene_terrain.xml` that adds obstacles, rough ground, or Perlin
-heightfields. Switching between them is a one-line change in `config.yaml`.
+Mujoco simulator ships with a flat ground scene (`scene.xml`) for each robot. So, use the terrain generator tool to produce a `scene_terrain.xml` that adds obstacles, rough ground, or Perlin heightfields.  
 
 #### Prerequisites (once)
 
@@ -424,14 +423,11 @@ heightfields. Switching between them is a one-line change in `config.yaml`.
 python3 -m pip install noise opencv-python-headless --break-system-packages
 ```
 
-> The system Python on Ubuntu 24.04 is externally-managed; `--break-system-packages` is
-> safe for these small packages.
+> The system Python on Ubuntu 24.04 is externally-managed; `--break-system-packages safe for these small packages.
 
 #### Generate terrain
 
-The terrain generator script (`terrain_tool/terrain_generator.py`) hardcodes `INPUT_SCENE_PATH = "./scene.xml"`, which is the go2 template. Running it unmodified will produce a `scene_terrain.xml` that references `go2.xml`, causing MuJoCo to fail with `XML Error: Error opening file '.../b2w/go2.xml'`.
-
-The reliable approach is to run the generator and then patch the output:
+The following runs the generator and then patches the output:
 
 ```bash
 cd /workspace/near-locomotion-quadruped/unitree_mujoco/terrain_tool
@@ -442,10 +438,8 @@ sed -i 's/model="go2 scene"/model="b2w scene"/' ../unitree_robots/b2w/scene_terr
 sed -i 's|<include file="go2.xml" />|<include file="b2w.xml"/>|' ../unitree_robots/b2w/scene_terrain.xml
 ```
 
-> The `sed` commands silently no-op if the generator's output strings differ from those above (e.g. a different generator version), leaving the go2 references in place. Confirm the patch actually applied before launching MuJoCo.
-
 <details>
-<summary><strong>What the patch should have changed in <code>scene_terrain.xml</code></strong></summary>
+<summary><strong>What should have changed in <code>scene_terrain.xml</code></strong></summary>
 
 After patching, `scene_terrain.xml` should reference `b2w`, not `go2`:
 
@@ -453,14 +447,6 @@ After patching, `scene_terrain.xml` should reference `b2w`, not `go2`:
 |---|---|---|
 | Scene model name | `model="go2 scene"` | `model="b2w scene"` |
 | Robot include | `<include file="go2.xml" />` | `<include file="b2w.xml"/>` |
-
-Quick check - this should print nothing if the patch worked:
-
-```bash
-grep go2 ../unitree_robots/b2w/scene_terrain.xml
-```
-
-If it prints any lines, the `sed` substitutions did not match; fix those references by hand before running MuJoCo.
 
 </details>
 
@@ -501,7 +487,7 @@ velocity commands:
 
 **In `b2w/config/deploy.yaml`**:
 <details>
-<summary><strong>Click to expand **In `b2w/config/deploy.yaml`** snippet</strong></summary>
+<summary><strong>Comment out keyboard_velocity_commands + Uncomment velocity_commands:</strong></summary>
 
 ```yaml
 observations:
@@ -533,14 +519,14 @@ mode, because the `transitions` (DDS joystick) and `keyboard_transitions` blocks
 
 #### Shared headers (unitree_rl_lab)
 
-These files are shared across all robots. Changes are backward-compatible and gated so
+Controller for B2W did not exist in this repo initially, so a duplicate with the same format as B2 and Go2w was created. Changes are backward-compatible and gated so
 existing robots (b2, go2, h1, g1_29dof) are unaffected.
 
-##### 1. `deploy/include/FSM/FSMState.h` - keyboard FSM transitions
+##### 1. [`deploy/include/FSM/FSMState.h`](../unitree_rl_lab/deploy/include/FSM/FSMState.h) - keyboard FSM transitions
 
 | Action | Why |
 |---|---|
-| Added a `keyboard_transitions` parsing block immediately after the existing `transitions` block and before `// register for all states` (code below). | When `FSMState::keyboard` is `nullptr` (robots that don't initialize it in `main.cpp`), the block is skipped - so existing robots (b2, go2, h1, g1_29dof) are unaffected. Transitions are edge-triggered (`on_pressed`, not held), so a brief keypress advances the FSM. |
+| Added a [`keyboard_transitions` parsing block](../unitree_rl_lab/deploy/include/FSM/FSMState.h#L47-L70) immediately after the existing `transitions` block and before `// register for all states` (code below). | When [`FSMState::keyboard`](../unitree_rl_lab/deploy/include/FSM/FSMState.h#L93) is `nullptr`, the block is skipped. |
 
 <details>
 <summary><strong>Click to expand CPP snippet</strong></summary>
@@ -581,20 +567,17 @@ keyboard_transitions:
   Passive:  "x"
 ```
 
-##### 2. `deploy/include/isaaclab/envs/mdp/observations/observations.h` - wheel-masked joint positions
+##### 2. [`deploy/include/isaaclab/envs/mdp/observations/observations.h`](../unitree_rl_lab/deploy/include/isaaclab/envs/mdp/observations/observations.h) - wheel-masked joint positions
 
 | Action | Why |
 |---|---|
-| Added a generic observation `joint_pos_rel_without_wheel` between `joint_pos_rel` and `joint_vel_rel` (code below); wheel indices are read from `deploy.yaml`. | The B2W policy was trained with `joint_pos_rel_without_wheel`: a 16-element `q - q_default` vector where the four wheel slots [12–15] are forced to 0.0 - wheel position is undefined for continuously-spinning joints, so feeding the raw value there is wrong. Output length always equals the full joint count (16) to match the policy input dimension. |
+| Added a generic observation [`joint_pos_rel_without_wheel`](../unitree_rl_lab/deploy/include/isaaclab/envs/mdp/observations/observations.h#L90) between `joint_pos_rel` and `joint_vel_rel` (code below); wheel indices are read from `deploy.yaml`. | The B2W policy was trained with `joint_pos_rel_without_wheel`: a 16-element `q - q_default` vector where the four wheel slots [12–15] are forced to 0.0 - wheel is only velocity controlled not position controlled. |
 
 <details>
 <summary><strong>Click to expand CPP snippet</strong></summary>
 
 ```cpp
 // Like joint_pos_rel, but zeroes the slots listed in params["wheel_joint_ids"].
-// Output length always equals the full joint count (16 for B2W), matching the
-// policy input dimension. Wheel slots are trained on 0.0 (position undefined
-// for continuously-spinning wheels), so feeding q-q_default there is wrong.
 REGISTER_OBSERVATION(joint_pos_rel_without_wheel)
 {
     auto & asset = env->robot;
@@ -621,11 +604,11 @@ joint_pos_rel_without_wheel:
   params: {wheel_joint_ids: [12, 13, 14, 15]}
 ```
 
-##### 3. `deploy/include/FSM/State_SitDown.h` - two-phase sit-down state
+##### 3. [`deploy/include/FSM/State_SitDown.h`](../unitree_rl_lab/deploy/include/FSM/State_SitDown.h) - implementing SitDown state
 
 | Action | Why |
 |---|---|
-| New FSM state with two phases, then auto-transitions to Passive. **Phase 1** (`settle_time` s): `kp=0`, Passive `kd` - pure damping bleeds momentum from the RL gait. **Phase 2** (`duration` s): linearly interpolates leg joints from the settled pose to the FixStand sit target (`qs[1]`). Wheel joints (`kp=0`) damp to a stop and are skipped from interpolation. | Cutting directly from Velocity to a position target snaps the joints from mid-stride to a fixed target, throwing the robot sideways. The damping phase lets momentum die out first; the interpolation then eases the legs down smoothly - allowing the robot to go from Velocity to SitDown in a controlled manner without falling. |
+| New FSM state with two phases, then auto-transitions to Passive. **Phase 1** ([`settle_time`](../unitree_rl_lab/deploy/include/FSM/State_SitDown.h#L22-L23) s): `kp=0`, Passive `kd` - pure damping bleeds momentum from the RL gait. **Phase 2** (`duration` s): linearly interpolates leg joints from the settled pose to the FixStand sit target (`qs[1]`). Wheel joints (`kp=0`) damp to a stop and are skipped from interpolation. | The damping phase lets momentum die out first and interpolation guides the robot down slowly. |
 
 <details>
 <summary><strong>Click to expand CPP snippet</strong></summary>
@@ -653,7 +636,7 @@ if(alpha >= 1.0f) done_ = true;
 
 ```yaml
 SitDown:
-  settle_time: 0.25   # seconds of pure-damping before interpolation starts
+  settle_time: 0.05   # seconds of pure-damping before interpolation starts
   duration:    2.5   # seconds for the leg-joint interpolation to the sit pose
 ```
 
@@ -661,9 +644,9 @@ SitDown:
 
 `deploy/robots/b2w/` was copied from `deploy/robots/b2/` and extended to support the four wheel joints. The B2 controller handles 12 DOF with pure position PD; B2W adds 4 velocity-controlled wheels on top, which required changes to the config arrays, the control loop, and the observation set. The shared DDS IDL and FSM structure are identical to B2.
 
-##### 4. `deploy/robots/b2w/config/config.yaml`
+##### 4. [`deploy/robots/b2w/config/config.yaml`](../unitree_rl_lab/deploy/robots/b2w/config/config.yaml)
 
-All joint arrays extended from 12 → 16 entries for the wheels. `keyboard_transitions` added to every FSM state. A `SitDown` state added for a graceful sit-down before going limp (absent in b2). `policy_dir` points at the b2w rough log root.
+All joint arrays extended from 12 → 16 entries for the wheels. `keyboard_transitions` added to every FSM state. A `SitDown` state added for a graceful sit-down before going limp (absent in b2). `policy_dir` points at the b2w multiexpert log root.
 
 <details>
 <summary><strong>Click to expand DIFF snippet</strong></summary>
@@ -683,23 +666,23 @@ All joint arrays extended from 12 → 16 entries for the wheels. `keyboard_trans
 +    keyboard_transitions:
 +      SitDown: "x"
 +      Velocity: "r"
-+    kp: [400, 400, 400, 400, 400, 400, 400, 400, 400, 400, 400, 400, 400, 400, 400, 400]
-+    kd: [  8,   8,   8,   8,   8,   8,   8,   8,   8,   8,   8,   8,   8,   8,   8,   8]
++    kp: [400, 400, 400, 400, 400, 400, 400, 400, 400, 400, 400, 400, 0, 0, 0, 0]
++    kd: [  8,   8,   8,   8,   8,   8,   8,   8,   8,   8,   8,   8,   3,   3,   3,   3]
    Velocity:
 +    keyboard_transitions:
 +      SitDown: "x"
 -    policy_dir: ../../../logs/rsl_rl/unitree_b2_velocity
-+    policy_dir: ../../../../robot_lab/logs/rsl_rl/unitree_b2w_rough
++    policy_dir: ../../../../robot_lab/logs/rsl_rl/unitree_b2w_multiexpert
 +  SitDown:
-+    settle_time: 0.5
++    settle_time: 0.05
 +    duration: 2.5
 ```
 
 </details>
 
-##### 5. `deploy/robots/b2w/main.cpp`
+##### 5. [`deploy/robots/b2w/main.cpp`](../unitree_rl_lab/deploy/robots/b2w/main.cpp)
 
-Keyboard initialised (b2 leaves it `nullptr`). `State_SitDown` included.
+[Keyboard initialised](../unitree_rl_lab/deploy/robots/b2w/main.cpp#L9) (b2 leaves it `nullptr`). `State_SitDown` included.
 
 ```diff
 +#include "FSM/State_SitDown.h"
@@ -709,11 +692,11 @@ Keyboard initialised (b2 leaves it `nullptr`). `State_SitDown` included.
 
 ```
 
-##### 6. `deploy/robots/b2w/src/State_RLBase.cpp`
+##### 6. [`deploy/robots/b2w/src/State_RLBase.cpp`](../unitree_rl_lab/deploy/robots/b2w/src/State_RLBase.cpp)
 
 Two additions over b2:
 
-**`keyboard_velocity_commands` observation** - maps WASD/QE/arrows/numpad to `[lin_vel_x, lin_vel_y, ang_vel_z]`. Activated in `deploy.yaml` by using `keyboard_velocity_commands` as the observation key instead of `velocity_commands`, replacing the gamepad for sim2sim.
+**[`keyboard_velocity_commands` observation](../unitree_rl_lab/deploy/robots/b2w/src/State_RLBase.cpp#L22)** - maps numpad to `[lin_vel_x, lin_vel_y, ang_vel_z]`. Activated in `deploy.yaml` by using `keyboard_velocity_commands` as the observation key instead of `velocity_commands`, replacing the gamepad for sim2sim.
 
 ```diff
 +REGISTER_OBSERVATION(keyboard_velocity_commands)
@@ -723,7 +706,7 @@ Two additions over b2:
 +}
 ```
 
-**Hybrid control loop** - b2 sends all joints as position PD; b2w splits into legs `[0,12)` position PD and wheels `[12,16)` velocity control (`kp=0`, `kd=KD_WHEEL=1.0`). `processed_actions()` already applies `scale=5.0` - do not multiply again.
+**Hybrid control loop** - b2 sends all joints as position PD; b2w splits into legs `[0,12)` position PD and wheels `[12,16)` velocity control (`kp=0`, [`kd=KD_WHEEL=1.0`](../unitree_rl_lab/deploy/robots/b2w/src/State_RLBase.cpp#L48)). `processed_actions()` already applies `scale=5.0` - do not multiply again.
 
 <details>
 <summary><strong>Click to expand DIFF snippet</strong></summary>
@@ -750,13 +733,13 @@ Two additions over b2:
 +YAML::LoadFile(param::config_dir / "deploy.yaml")
 ```
 
-##### 7. `deploy/robots/b2w/config/deploy.yaml` - NEW (does not exist in b2)
+##### 7. [`deploy/robots/b2w/config/deploy.yaml`](../unitree_rl_lab/deploy/robots/b2w/config/deploy.yaml) - NEW (does not exist in b2)
 
 RobotLab training runs save their Isaac Lab/RSL-RL configs under each run's `params/` folder as
 `env.yaml` and `agent.yaml`; they do **not** generate `deploy.yaml`.
 
 `deploy.yaml` belongs to the separate `unitree_rl_lab` deployment stack. It is the hand-written
-adapter that lets the Unitree C++ controller run a RobotLab-trained B2W policy by recreating the
+adapter that lets the Unitree C++ controller run a RobotLab repo trained B2W policy by recreating the
 same runtime interface the policy saw during training: observation order, command inputs, joint
 mapping, action scaling, leg PD gains, wheel velocity control, and B2W-specific wheel observation
 handling.
@@ -801,15 +784,19 @@ Train a locomotion policy in Isaac Lab, watch it in the Isaac Sim GUI, export it
 
 ### 4.1 Step 1 - Train Teacher in Isaac Lab
 
-Open a terminal and set up the Isaac Lab Python environment first.
+Open a terminal and set up the Isaac Lab Python environment first. Each terrain expert is trained as its own teacher - run the command for the expert you want.
 
+**The following example is for training Teacher Policy:**
 ```bash
 setup_isaaclab
 cd /workspace/near-locomotion-quadruped/robot_lab
 python scripts/reinforcement_learning/rsl_rl/train.py \
-  --task=RobotLab-Isaac-Velocity-Rough-Unitree-B2W-v0 \
+  --task=RobotLab-Isaac-Velocity-StaircaseUp-Teacher-Unitree-B2W-v0 \
   --headless --max_iterations 5000   # without --max_iterations it runs for 20000 iterations
 ```
+For other experts replace the `task` flag with:  
+**Slope Up teacher**: `RobotLab-Isaac-Velocity-SlopeUp-Teacher-Unitree-B2W-v0`  
+
 
 <details>
 <summary><strong>Training with wandb logging</strong></summary>
@@ -878,13 +865,10 @@ python scripts/reinforcement_learning/rsl_rl/train.py \
 ```
 </details>
 
-Checkpoints are saved to:
+Checkpoints are saved per teacher experiment:
 ```
-/workspace/near-locomotion-quadruped/robot_lab/logs/rsl_rl/unitree_b2w_rough/<timestamp>/
+/workspace/near-locomotion-quadruped/robot_lab/logs/rsl_rl/unitree_b2w_staircaseup_teacher/<timestamp>/
 ```
-
-Training saves a checkpoint every 100 iterations. Ctrl+C is safe to interrupt between saves.
-If the machine goes to sleep, training pauses and resumes on wake (the process stays alive).
 
 ### 4.2 Step 1b - Watch the Robot Walk in Isaac Sim
 
@@ -895,13 +879,6 @@ Use `play.py` to load a checkpoint, watch the robot in the Isaac Sim GUI, and ex
 - `--num_envs 1` - spawn a single robot; omit for multiple parallel environments (no keyboard then).
 - `--keyboard` - steer interactively. Drives `base_velocity` from the keyboard (velocity tasks).
 - `--load_actor_only` - load only the actor and skip critic weights. Use this when the actor observation space matches but the critic observation space differs between tasks.
-
-#### Check how many iterations you have
-
-```bash
-ls /workspace/near-locomotion-quadruped/robot_lab/logs/rsl_rl/unitree_b2w_rough/<timestamp>/
-# look for model_<N>.pt - the highest N is the last saved iteration
-```
 
 #### Run play.py with keyboard control
 
@@ -934,120 +911,42 @@ python scripts/reinforcement_learning/rsl_rl/play.py \
 
 </details>
 
+> **Verify each expert before distillation.** Do not start distillation until you have visually confirmed that every teacher actually performs its skill well - a weak teacher distils into a weak student. Check each expert in **both** environments:
+> - **Isaac Sim** - the `play.py` run above; watch the teacher climb/ascend its terrain cleanly under keyboard control.
+> - **MuJoCo sim2sim** - follow [Section 4.6 - Sim2Sim in MuJoCo](#46-step-3---sim2sim-in-mujoco) to confirm the same behaviour survives the sim2sim transfer.
+>
+> If a teacher is timid, drifts, or falls, tweak its rewards and retrain before distilling. See [Section 5 - Curriculum Training with Different Terrain](#5-curriculum-training-with-different-terrain) (e.g. [5.5 Worked example: StaircaseUp teacher](#55-worked-example-staircaseup-teacher)) for exactly which rewards were tuned and why.
+
 
 ### 4.3 Step 1c - Distillation (Student-Teacher)
 
 Distillation produces a deployable student policy that uses only proprioceptive observations (no height scan, no linear velocity). Student learns to mimic it via MSE loss on its own on-policy rollouts.
 
-> The teacher/student, distillation, and DAgger concepts used below are explained in full in [Section 12 - Distillation using DAGGER](#12-distillation-using-dagger-student). This step is optional - the rough velocity policy from Step 1 is already deployable on its own.
+#### Phase 1 - Train the teachers (PPO)
 
-#### Phase 1 - Train the teacher (PPO)
+The teachers are the privileged PPO policies already trained in [Step 1](#41-step-1---train-teacher-in-isaac-lab) - the StaircaseUp expert and the SlopeUp expert in this case. Make sure each one has been visually verified (see the note at the end of [Section 4.2](#42-step-1b---watch-the-robot-walk-in-isaac-sim)) before distilling.
 
-The teacher is the privileged PPO policy already trained in [Step 1](#41-step-1---train-teacher-in-isaac-lab) - no extra training is needed here. That checkpoint is reused as the frozen label source; pass its run timestamp to `--load_run` in the Phase 2 commands below.
+#### Phase 2 - Multi-Expert Distillation
 
-#### Phase 2 - Distil teacher into student
+Multi-expert distillation distils **several** terrain experts (e.g. StaircaseUp + SlopeUp) into **one** student in a single run. All experts are listed in [`teachers.txt`](../robot_lab/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/unitree_b2w/teachers.txt); the combined environment is built from them and each robot is taught by the expert matching its terrain.
 
-The student can be one of two network types:
+> **Check `teachers.txt` first.** Before training, open [`teachers.txt`](../robot_lab/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/unitree_b2w/teachers.txt) and confirm it lists exactly the experts you want, each pointing at the correct (visually-verified) teacher checkpoint. The combined environment is built straight from this file - a wrong or stale entry silently distils the wrong teacher.
 
-- **MLP** (`rsl_rl_distillation_cfg_entry_point`) = a plain feed-forward network. It maps the current single frame of observations straight to an action - no memory of previous steps.
-- **LSTM** (`rsl_rl_distillation_recurrent_cfg_entry_point`) = a recurrent neural network (RNN), specifically the LSTM variety. It keeps a hidden state (`h`/`c`) that carries information across timesteps, so each action depends not just on the current frame but on the history of what it has seen.
-
-#### Phase 2a - MLP distillation
-
-Feed-forward student (single-frame observation, no memory):
+The student here is an **LSTM** (recurrent), not an **MLP** (feed-forward).   
 
 ```bash
 cd /workspace/near-locomotion-quadruped/robot_lab
 python scripts/reinforcement_learning/rsl_rl/train.py \
-  --task=RobotLab-Isaac-Velocity-Rough-Unitree-B2W-v0 \
-  --agent=rsl_rl_distillation_cfg_entry_point \
-  --load_run 2026-05-24_05-47-04 \
+  --task=RobotLab-Isaac-Velocity-MultiExpert-Teacher-Unitree-B2W-v0 \
+  --agent=rsl_rl_distillation_recurrent_cfg_entry_point \
   --headless
 ```
 
-`--load_run` is the **timestamp folder name only** (not the full path) from the Phase 1 PPO run. The script automatically looks in `logs/rsl_rl/unitree_b2w_rough/`.
+No `--load_run` is needed here. Teacher checkpoints come from `teachers.txt`.  
+Students land in `logs/rsl_rl/unitree_b2w_multiexpert/`. How `teachers.txt` is parsed and the code behind it is in [Section 5.6 - Multi-Expert Terrain](#56-multi-expert-terrain); scoring the student on each teacher's terrain is in [Section 4.5](#45-step-2a---evaluate-policies-per-level-evaluation-csv).
 
-##### Play / evaluate the MLP student
-
-```bash
-python scripts/reinforcement_learning/rsl_rl/play.py \
-  --task=RobotLab-Isaac-Velocity-Rough-Unitree-B2W-v0 \
-  --agent=rsl_rl_distillation_cfg_entry_point \
-  --load_run 2026-05-29_07-07-23 \
-  --keyboard
-```
-
-To load a specific checkpoint pass the **full absolute path**:
-
-```bash
-python scripts/reinforcement_learning/rsl_rl/play.py \
-  --task=RobotLab-Isaac-Velocity-Rough-Unitree-B2W-v0 \
-  --agent=rsl_rl_distillation_cfg_entry_point \
-  --checkpoint /workspace/near-locomotion-quadruped/robot_lab/logs/rsl_rl/unitree_b2w_rough/2026-05-29_07-07-23/model_500.pt \
-  --keyboard
-```
-
-#### Phase 2b - LSTM distillation
-
-Recurrent (LSTM) student. It carries a hidden state across timesteps, letting it implicitly estimate the linear velocity it cannot observe directly. This minimises the velocity drift as seen with feed-forward MLP student.  
-
-```bash
-python scripts/reinforcement_learning/rsl_rl/train.py \
-  --task=RobotLab-Isaac-Velocity-Rough-Unitree-B2W-v0 \
-  --agent=rsl_rl_distillation_recurrent_cfg_entry_point \
-  --load_run 2026-05-24_05-47-04 \
-  --headless
-```
-
-##### Play / evaluate the LSTM student
-
-Use the **recurrent** agent so `play.py` rebuilds the LSTM and carries its hidden state across steps:
-
-```bash
-python scripts/reinforcement_learning/rsl_rl/play.py \
-  --task=RobotLab-Isaac-Velocity-Rough-Unitree-B2W-v0 \
-  --agent=rsl_rl_distillation_recurrent_cfg_entry_point \
-  --load_run 2026-05-29_07-07-23 \
-  --keyboard
-```
-
-To load a specific checkpoint pass the **full absolute path**:
-
-```bash
-python scripts/reinforcement_learning/rsl_rl/play.py \
-  --task=RobotLab-Isaac-Velocity-Rough-Unitree-B2W-v0 \
-  --agent=rsl_rl_distillation_recurrent_cfg_entry_point \
-  --checkpoint /workspace/near-locomotion-quadruped/robot_lab/logs/rsl_rl/unitree_b2w_rough/2026-05-29_07-07-23/model_500.pt \
-  --keyboard
-```
-
-#### Warm-start student from a previous distillation run (multi-task reuse)
-
-Match the `--agent` to the network type of the student you are warm-starting - the `--load_student_run` checkpoint must come from a run with the same architecture.
-
-MLP student:
-
-```bash
-python scripts/reinforcement_learning/rsl_rl/train.py \
-  --task=RobotLab-Isaac-Velocity-Rough-Unitree-B2W-v0 \
-  --agent=rsl_rl_distillation_cfg_entry_point \
-  --load_run <new_ppo_run> \
-  --load_student_run <prev_distillation_run> \
-  --headless
-```
-
-LSTM student:
-
-```bash
-python scripts/reinforcement_learning/rsl_rl/train.py \
-  --task=RobotLab-Isaac-Velocity-Rough-Unitree-B2W-v0 \
-  --agent=rsl_rl_distillation_recurrent_cfg_entry_point \
-  --load_run <new_ppo_run> \
-  --load_student_run <prev_distillation_run> \
-  --headless
-```
 <details>
-<summary><strong>Code Changes</strong></summary>
+<summary><strong>Code Changes (LSTM student cfg)</strong></summary>
 **File:** `.../config/wheeled/unitree_b2w/agents/rsl_rl_distillation_cfg.py`
 
 **File:** `.../config/wheeled/unitree_b2w/agents/rsl_rl_distillation_cfg.py`
@@ -1064,6 +963,32 @@ python scripts/reinforcement_learning/rsl_rl/train.py \
 - Registered `rsl_rl_distillation_recurrent_cfg_entry_point` → `UnitreeB2WRoughDistillationRunnerRecurrentCfg` on the rough task.
 </details>
 
+
+#### Phase 3 - Visually verify the student in Isaac Sim
+
+Before exporting, watch the distilled student drive in the Isaac Sim GUI. Use the same task and recurrent agent as training, and steer it with the keyboard:
+
+```bash
+setup_isaaclab
+cd /workspace/near-locomotion-quadruped/robot_lab
+python scripts/reinforcement_learning/rsl_rl/play.py \
+  --task=RobotLab-Isaac-Velocity-MultiExpert-Teacher-Unitree-B2W-v0 \
+  --agent=rsl_rl_distillation_recurrent_cfg_entry_point \
+  --num_envs 1 \
+  --keyboard
+```
+
+Omit `--load_run` to auto-load the most recent `unitree_b2w_multiexpert` run. Drive it with the numpad keys from [Section 4.2](#42-step-1b---watch-the-robot-walk-in-isaac-sim) and confirm the single student handles every teacher's terrain cleanly.
+
+> **Run headless instead.** Add `--headless` (and drop `--num_envs 1 --keyboard`) to run without opening a window - useful on a remote box or when you only want to trigger the ONNX export:
+> ```bash
+> python scripts/reinforcement_learning/rsl_rl/play.py \
+>   --task=RobotLab-Isaac-Velocity-MultiExpert-Teacher-Unitree-B2W-v0 \
+>   --agent=rsl_rl_distillation_recurrent_cfg_entry_point \
+>   --headless
+> ```
+
+
 ### 4.4 Step 2 - Export to ONNX
 
 Running `play.py` auto-exports `policy.onnx` into an `exported/` subfolder next to the loaded checkpoint.
@@ -1072,10 +997,12 @@ Running `play.py` auto-exports `policy.onnx` into an `exported/` subfolder next 
 setup_isaaclab
 cd /workspace/near-locomotion-quadruped/robot_lab
 python scripts/reinforcement_learning/rsl_rl/play.py \
-  --task=RobotLab-Isaac-Velocity-Rough-Unitree-B2W-v0 \
+  --task=RobotLab-Isaac-Velocity-MultiExpert-Teacher-Unitree-B2W-v0 \
+  --agent=rsl_rl_distillation_recurrent_cfg_entry_point \
   --headless
 ```
 > Can **Ctrl+C** if it runs successfully without crashing.
+> The `--agent` flag loads the recurrent (LSTM) distillation student; without it, `play.py` would try to load the multiexpert checkpoint as a plain PPO actor.
 
 <details>
 <summary><strong>Export from a specific run</strong></summary>
@@ -1083,7 +1010,8 @@ python scripts/reinforcement_learning/rsl_rl/play.py \
 ```bash
 setup_isaaclab
 python scripts/reinforcement_learning/rsl_rl/play.py \
-  --task=RobotLab-Isaac-Velocity-Rough-Unitree-B2W-v0 \
+  --task=RobotLab-Isaac-Velocity-MultiExpert-Teacher-Unitree-B2W-v0 \
+  --agent=rsl_rl_distillation_recurrent_cfg_entry_point \
   --headless \
   --load_run 2026-05-24_05-47-04
 ```
@@ -1091,7 +1019,7 @@ python scripts/reinforcement_learning/rsl_rl/play.py \
 
 The exported policy will be at:
 ```
-/workspace/near-locomotion-quadruped/robot_lab/logs/rsl_rl/unitree_b2w_rough/<timestamp>/exported/policy.onnx
+/workspace/near-locomotion-quadruped/robot_lab/logs/rsl_rl/unitree_b2w_multiexpert/<timestamp>/exported/policy.onnx
 ```
 
 ### 4.5 Step 2a - Evaluate Policies (Per-Level Evaluation CSV)
@@ -1106,9 +1034,26 @@ python scripts/evaluation/evaluation.py \
   --headless
 ```
 
-The orchestrator calls `eval_worker.py` for each compatible policy/terrain pair and writes one row per terrain level, plus a collapsed `<out_csv>_summary.csv` matrix with one summative success rate per terrain. See [Section 6](#6-evaluation-matrix) for the full command, dynamic policy lookup, success metric, and CSV columns.
+The orchestrator calls `eval_worker.py` for each compatible policy/terrain pair and writes one row per terrain level, plus a collapsed `<out_csv>_summary.csv` matrix with one summative success rate per terrain. See [Section 6](#6-evaluation-matrix) for the full command, dynamic policy lookup, success metric, and CSV columns. By default the evaluation is done at 0.9*maximum training diffculty.
 
 For normal use, call `scripts/evaluation/evaluation.py` instead of `eval_worker.py` directly. The orchestrator fills in the task ids, policy labels, terrain labels, level count, robot count, duration, and output CSV for you.
+
+#### Evaluate a multi-expert student on the teachers' terrains
+
+To score a multi-expert student (from [Section 4.3](#43-step-1c---distillation-student-teacher)) on each terrain it was distilled from, pass the student to `--policies` and the teacher terrains to `--terrain`:
+
+```bash
+setup_isaaclab
+cd /workspace/near-locomotion-quadruped/robot_lab
+python scripts/evaluation/evaluation.py \
+  --policies unitree_b2w_multiexpert \
+  --terrain staircaseup_teacher slopeup_teacher \
+  --headless
+```
+
+`--terrain` forces every policy to be run on every listed terrain (otherwise terrains are inferred from the policy name). Valid `--terrain` keys are the [`KNOWN_TERRAINS`](../robot_lab/scripts/evaluation/evaluation.py) keys, e.g. `flat`, `rough`, `staircaseup_teacher`, `slopeup_teacher`.
+
+> The `unitree_b2w_multiexpert` checkpoint is a **distillation** checkpoint (it stores `student_state_dict`, not `actor_state_dict`). [`evaluation.py`](../robot_lab/scripts/evaluation/evaluation.py) maps that experiment to the distillation agent entry point automatically, so the deployable LSTM student is loaded and scored - no extra flags needed.
 
 
 ### 4.6 Step 3 - Sim2Sim in MuJoCo
@@ -1152,13 +1097,13 @@ cd /workspace/near-locomotion-quadruped/unitree_rl_lab/deploy/robots/b2w/build
 | 1 | *(wait)* | Robot spawns limp in Passive state |
 | 2 | `f` | Stands up (FixStand, ~3 s) |
 | 3 | `r` | Policy activates (Velocity mode) |
-| 4 | `w` / `s` / `a` / `d` | Forward / backward / strafe left / right |
-| 5 | `q` / `e` | Yaw CCW / CW |
+| 4 | Numpad `8` / `2` / `4` / `6` | Forward / backward / strafe left / right |
+| 5 | Numpad `7` / `9` | Yaw CCW / CW |
 | 6 | `x` | Return to sitdown |
 
 </details>
 
-Velocity commands use the WASD keys (`w`/`s`/`a`/`d`) plus `q`/`e` for yaw.
+Velocity commands use the numpad keys (`8`/`2`/`4`/`6`) plus `7`/`9` for yaw - the same mapping as the §4.2 keyboard-controls table. (`keyboard_velocity_commands` in the controller only maps these numpad digits.)
 
 > Pressing `x` returns the robot to Passive - it slowly sits down and goes limp.
 
@@ -1179,10 +1124,7 @@ The controller loads it from there on every startup. After training and exportin
 policy, just start `./b2w_ctrl --network lo` as normal - it picks up the new `policy.onnx`
 automatically and reads `deploy.yaml` from `config/`.
 
-> **When to update deploy.yaml:** the file content is determined by `rough_env_cfg.py`. As
-> long as you retrain the same task without changing observation terms, scales, or the
-> action structure, `config/deploy.yaml` works for every run. If you change the obs layout
-> (add/remove terms, change scales), update `config/deploy.yaml` to match before running.
+> No rebuild needed here, as just tweaking yaml file. Latest .onnx file from the logs/<task> will be obtained.
 
 ### 4.7 Step 3b - Generate rough terrain
 
@@ -1195,15 +1137,15 @@ Check how to set it up under [B2W MuJoCo Sim2Sim Validation → Terrain Generati
 
 ### 4.8 Step 4 - Sim2Real (to be tested)
 
-> **Verify config first.** Hardware is unforgiving - before running on the real robot, walk the full checklist in [§8. B2W Config (Verify Before Sim2Real)](#8-b2w-config-verify-before-sim2real) and confirm every value matches the [official `unitree_ros` B2W URDF](https://github.com/unitreerobotics/unitree_ros/tree/master/robots/b2w_description). A wrong effort limit, gain, or default pose can drive the legs into a fall on the first step.
+> **Verify config first.** Before running on the real robot, walk the full checklist in [§8. B2W Config (Verify Before Sim2Real)](#8-b2w-config-verify-before-sim2real) and confirm every value matches the [official `unitree_ros` B2W URDF](https://github.com/unitreerobotics/unitree_ros/tree/master/robots/b2w_description).
 
-Following are the steps to deploy
-`robot_lab/logs/rsl_rl/unitree_b2w_rough` onto the real robot - this should be a safe starting point to just walk.  
+Following are the steps to deploy the multiexpert student policy
+(`robot_lab/logs/rsl_rl/unitree_b2w_multiexpert`) onto the real robot
 
 The controller binary, `deploy.yaml`, and FSM are **identical to sim2sim** - the same `b2w_ctrl`
 you already ran against MuJoCo. Only two things change for hardware:
 
-1. `policy_dir` in `config.yaml` points at the rough-policy log root (already the default).
+1. `policy_dir` in `config.yaml` points at the multiexpert student log root.
 2. `b2w_ctrl` runs on the robot's real network interface instead of `lo`.
 
 
@@ -1216,19 +1158,19 @@ The E-Stop Button is **X** on the laptop, after deploying the policy.
 - The physical B2W is powered on and sitting on the ground. It does not need to be put in any
   special low-level mode - the controller claims the motor channel on startup, and `f` stands it up.
 
-#### 1. Export the rough policy to ONNX
+#### 1. Export the multiexpert student policy to ONNX
 
 To deploy onto the robot, need `.onnx` format file.
 See [Step 2 - Export to ONNX](#44-step-2---export-to-onnx) for details.
 
-#### 2. Confirm the controller points at the rough logs
+#### 2. Confirm the controller points at the multiexpert student logs
 
 In [`unitree_rl_lab/deploy/robots/b2w/config/config.yaml`](../unitree_rl_lab/deploy/robots/b2w/config/config.yaml),
-`policy_dir` under the `Velocity` state should be the rough log root:
+`policy_dir` under the `Velocity` state should be the multiexpert student log root:
 
 ```yaml
   Velocity:
-    policy_dir: ../../../../robot_lab/logs/rsl_rl/unitree_b2w_rough
+    policy_dir: ../../../../robot_lab/logs/rsl_rl/unitree_b2w_multiexpert
 ```
 
 `parser_policy_dir()` goes down the folder and auto-selects the newest timestamp dir containing an
@@ -1261,8 +1203,8 @@ Identical to sim2sim. Keep the controller's terminal focused for keyboard input.
 | 1 | *(wait)* | Robot limp in Passive |
 | 2 | `f` | Stands up (FixStand, ~3 s) |
 | 3 | `r` | Policy engages (Velocity mode) |
-| 4 | `w` / `s` / `a` / `d` | Forward / backward / strafe left / right |
-| 5 | `q` / `e` | Yaw CCW / CW |
+| 4 | Numpad `8` / `2` / `4` / `6` | Forward / backward / strafe left / right |
+| 5 | Numpad `7` / `9` | Yaw CCW / CW |
 | 6 | `x` | E-stop: graceful sit-down → Passive |
 
 </details>
@@ -1302,7 +1244,7 @@ the ethernet tether is only needed up front to build and launch.
 
 1. Over the tether, SSH into the Jetson (`192.168.123.164`) and build there. The x86_64 workstation
    binary will not run on the Jetson's ARM64, so rebuild `unitree_sdk2` and `b2w_ctrl` on the
-   Jetson, and copy the `unitree_b2w_rough` log dir across so `policy_dir` resolves locally.
+   Jetson, and copy the `unitree_b2w_multiexpert` log dir across so `policy_dir` resolves locally.
 2. Launch on the Jetson with `--network <jetson NIC on 192.168.123.0/24>`. Once it is running the
    tether can be unplugged - the controller lives entirely on the robot.
 3. Drive with the wireless remote instead of the keyboard: switch the velocity observation from
@@ -1312,7 +1254,7 @@ the ethernet tether is only needed up front to build and launch.
 
 ---
 
-## 5. Rough Terrain Curriculum Training on Isaac-Sim
+## 5. Curriculum Training with Different Terrain
 
 Every B2W terrain policy uses **velocity tracking** (the robot is told a forward/sideways/turning speed and rewarded for matching it). What you vary between policies is the **terrain** - the obstacles the robot trains on (stairs, slopes, boxes, rough ground, ...), see [5.4](#54-plug-in-a-different-terrain).
 
@@ -1382,7 +1324,7 @@ At the start of training, each of the 4096 environments is assigned a **random s
 self.terrain_levels = torch.randint(0, max_init_level + 1, (num_envs,), device=self.device)
 ```
 
-`max_init_terrain_level = 5` is set in the scene config, so no robot starts on the hardest half of the terrain grid. The upper levels (6–9) are unlocked only through earned progression during training.
+`max_init_terrain_level = 5` (for `rough_env_cfg.py` only) is set in the scene config, so no robot starts on the hardest half of the terrain grid. The upper levels (6–9) are unlocked only through earned progression during training.
 
 #### Progression and regression at each episode end
 
@@ -1469,7 +1411,8 @@ The B2W robot is therefore commanded to track velocities from the full range (`�
 
 ### 5.4 Plug in a different terrain
 
-A terrain variant is just a new `TerrainGeneratorCfg` wired into a subclass of the rough env. You never edit `v0` - you create a parallel task that reuses everything except the terrain. The recipe is four files; each one is a small, self-contained addition.
+A terrain variant is just a new `TerrainGeneratorCfg` wired into a subclass of the `rough-env-v0`.  
+Don't edit `v0`, instead create a parallel env cfg that follows the same format, with different terrain and reward system (if needed).
 
 #### First, pick your terrain configs
 
@@ -1511,7 +1454,7 @@ The actual geometry generation functions (useful for understanding what each ter
 **Step 2 - Add the env config.** Create `<task>_env_cfg.py` next to [`rough_env_cfg.py`](../robot_lab/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/unitree_b2w/rough_env_cfg.py). Define a fresh `TerrainGeneratorCfg` (never mutate `ROUGH_TERRAINS_CFG` - it is shared by `v0`), subclass `UnitreeB2WRoughEnvCfg`, and swap in the new generator in `__post_init__`. Re-apply the two guards the parent gates on its own class name:
 
 <details>
-<summary><strong>Click to expand PYTHON snippet</strong></summary>
+<summary><strong>Click to expand template snippet</strong></summary>
 
 ```python
 import isaaclab.terrains as terrain_gen
@@ -1541,9 +1484,9 @@ class UnitreeB2W<task>EnvCfg(UnitreeB2WRoughEnvCfg):
             self.disable_zero_weight_rewards()
 ```
 
-</details>
-
 > **Note on `gpu_collision_stack_size`:** terrains with many discrete surfaces (stepping stones, gap, repeated objects) generate far more collision contacts than smooth terrains. If you see `PhysX error: collisionStackSize buffer overflow` at runtime, add `self.sim.physx.gpu_collision_stack_size = 2**27` to `__post_init__` to raise the GPU buffer from the default 64 MB to 128 MB.
+
+</details>
 
 **Step 3 - Add a PPO runner config.** Append to [`rsl_rl_ppo_cfg.py`](../robot_lab/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/unitree_b2w/agents/rsl_rl_ppo_cfg.py) so the variant logs to its own directory:
 
@@ -1594,7 +1537,7 @@ The registered task is:
 RobotLab-Isaac-Velocity-StaircaseUp-Teacher-Unitree-B2W-v0
 ```
 
-It is still a **velocity tracking** task: the robot is asked to follow forward/sideways/turning speed commands. The staircase changes where it practices, and the reward tuning makes climbing less timid.
+This is a **velocity tracking** task: the robot is asked to follow forward/sideways/turning speed commands.
 
 #### Step 1 - Choose the terrain composition
 
@@ -1611,7 +1554,7 @@ The config creates a new `STAIRCASEUP_TEACHER_CFG` instead of editing the shared
 | `MeshInvertedPyramidStairsTerrainCfg` | 50% | sharp, solid stair edges |
 | `HfInvertedPyramidStairsTerrainCfg` | 50% | smoother heightfield stairs |
 
-Both use step heights from **4 cm to 30 cm**. That makes the hard rows tougher than the default rough task, where stair height tops out around 23 cm.
+Both use step heights from **6 cm to 20 cm** with a fixed 27.5 cm tread, centred on the real hanger staircase (16.8 cm rise, 27.8 cm step width). Every tile here is an ascending staircase.
 
 #### Step 2 - Add the env config
 
@@ -1629,8 +1572,6 @@ Inside `__post_init__`, it makes the staircase task different from the default r
 | `self.sim.physx.gpu_collision_stack_size = 2**27` | give PhysX more room for many stair contacts |
 | `curriculum = True` on the new terrain generator | keep the row-by-row difficulty curriculum from 5.3 |
 | `self.scene.terrain.max_init_terrain_level = 0` | start on the easiest stair row |
-| `episode_length_s: 20.0 -> 30.0` | give the robot more time to complete a stair climb |
-| `PROMOTE_TRAVEL_FRACTION = 0.25` | promote after completing half of the full stair flight instead of requiring the full traversal |
 
 Then it keeps velocity tracking but tunes the rewards for climbing:
 
@@ -1638,13 +1579,15 @@ Then it keeps velocity tracking but tunes the rewards for climbing:
 |---|---|
 | `track_lin_vel_xy_exp: 3.0 -> 5.0` | reward forward/sideways speed tracking more |
 | `track_ang_vel_z_exp: 1.5 -> 2.5` | reward turning speed tracking more |
-| `upward: 3.0 -> 0.25` | avoid paying the robot too much just to stand upright |
 | `action_rate_l2: -0.01 -> -0.0025` | allow quicker leg motions |
 | `joint_pos_penalty: -1.0 -> -0.25` | allow bigger leg bends on stairs |
 | `lin_vel_z_l2: -2.0 -> -0.5` | allow the body to rise when climbing |
 | `feet_height_body: 0 -> -2.0` | encourage higher foot/wheel clearance |
 
-The biggest improvement came from increasing the episode length from 20 s to 30 s and relaxing the promotion criterion to half of the stair flight. This task takes time: on stairs the robot is expected to move a little slower than on flat or mixed rough terrain, so the slightly longer episode gives it room to make real progress before timeout. The reduced `upward` reward is a smaller but useful change: it keeps uprightness helpful without letting standing still compete too strongly with climbing.
+**Raising the rewards** (`track_lin_vel_xy_exp` 3.0 → 5.0, `track_ang_vel_z_exp` 1.5 → 2.5) so moving beats standing still.  
+**Relaxing the penalties** that fight climbing (`action_rate_l2`, `joint_pos_penalty`, `lin_vel_z_l2`) so the robot can take quicker, bigger leg motions and let its body rise onto a step.  
+Turning on `feet_height_body` (0 → -2.0) lifts the feet/wheels higher to clear taller steps.  
+Everything else (episode length, curriculum promotion, `upward`) is inherited unchanged from the rough task.
 
 Finally, it reruns `disable_zero_weight_rewards()` for this subclass, because the parent only does that automatically for its own base class name.
 
@@ -1700,6 +1643,61 @@ python scripts/reinforcement_learning/rsl_rl/train.py \
 In short: this teacher does not introduce a new reward style. It uses the same velocity tracking idea as the rough task, but trains on staircase-only terrain and relaxes the penalties that would otherwise make climbing too cautious.
 
 
+### 5.6 Multi-Expert Terrain
+
+The teachers in 5.5 each cover **one** terrain. A multi-expert run merges several of those experts into **one** combined environment and distils them into **one** deployable LSTM student. Each robot trains on the terrain it spawns on and is copied (behavior-cloned) by the matching expert - the per-env routing from *Parkour in the Wild*. The result: no forgetting, a single run, and one student that handles every terrain at once.
+
+#### `teachers.txt` drives the whole thing
+
+The experts are listed in [`teachers.txt`](../robot_lab/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/unitree_b2w/teachers.txt), one per line. The **line index is the expert id**:
+
+```
+# task_id                                                    expert_PPO_checkpoint
+RobotLab-Isaac-Velocity-StaircaseUp-Teacher-Unitree-B2W-v0  /abs/.../unitree_b2w_staircaseup_teacher/
+RobotLab-Isaac-Velocity-SlopeUp-Teacher-Unitree-B2W-v0      /abs/.../unitree_b2w_slopeup_teacher/
+```
+
+- `task_id` - the per-teacher task (from 5.4 / 5.5). Its terrain is pulled in and merged into the combined env.
+- `expert_PPO_checkpoint` - that expert's trained PPO checkpoint, loaded as its teacher (newest `model_*.pt` is auto-picked from a run folder).
+- optional third column - a per-expert `weight` (default `1.0`) that sets its share of terrain columns.
+
+At startup the combined env reads the file, merges every expert's sub-terrains into one curriculum terrain, and computes a **column → expert** map (using the terrain generator's deterministic column formula) so each robot is supervised by the expert for the terrain it stands on. **Add an expert = add a line** - the terrain and routing reshape automatically.
+
+Train it as shown in [Section 4.3](#43-step-1c---distillation-student-teacher); students land in `logs/rsl_rl/unitree_b2w_multiexpert/`. Score the student per terrain in [Section 4.5](#45-step-2a---evaluate-policies-per-level-evaluation-csv).
+
+<details>
+<summary><strong>Multi-expert training - code changes</strong></summary>
+
+Four new files, **no `train.py` edit**. The combined env auto-shapes from `teachers.txt`.
+
+1. [`multiexpert_teacher_env_cfg.py`](../robot_lab/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/unitree_b2w/multiexpert_teacher_env_cfg.py) - reads `teachers.txt`, merges each listed task's sub-terrains into one curriculum terrain, precomputes the column → expert map, and stores the checkpoint paths + map on the cfg for the algorithm to read.
+2. [`mdp/distillation/multiteacher.py`](../robot_lab/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/distillation/multiteacher.py) (+ [`__init__.py`](../robot_lab/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/distillation/__init__.py)) - `MultiTeacherDistillation`, a subclass of RSL-RL `Distillation`. It loads N frozen teachers, routes supervision per env in `act()`, and saves `student_state_dict` plus a per-expert `teacher_<i>_state_dict`.
+3. [`agents/rsl_rl_multiexpert_distillation_cfg.py`](../robot_lab/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/unitree_b2w/agents/rsl_rl_multiexpert_distillation_cfg.py) - reuses the recurrent (LSTM) runner cfg from [Section 4.3](#43-step-1c---distillation-student-teacher) and only swaps the algorithm `class_name` to `MultiTeacherDistillation`; `experiment_name = unitree_b2w_multiexpert`.
+4. [`__init__.py`](../robot_lab/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/unitree_b2w/__init__.py) - registers `RobotLab-Isaac-Velocity-MultiExpert-Teacher-Unitree-B2W-v0`.
+
+> No `train.py` edit is needed: the stock single-checkpoint load only fires when `algorithm.class_name == "Distillation"`. Here it is the dotted `MultiTeacherDistillation` path, so that branch is skipped and `--load_run` is not required.
+
+</details>
+
+<details>
+<summary><strong>Sim2sim of the recurrent student - code changes</strong></summary>
+
+The distilled student is an **LSTM**, so it is stateful. `play.py` exports an ONNX graph with hidden-state I/O (`h_in`/`c_in` in, `h_out`/`c_out` out), not just `obs → actions`. The stock C++ runner ([`OrtRunner`](../unitree_rl_lab/deploy/include/isaaclab/algorithms/algorithms.h)) expects a stateless MLP and aborts on activation:
+
+```
+what(): Input name h_in not found in observations.
+```
+
+Fix (b2w-local, shared deploy library untouched):
+
+- New [`RecurrentOrtRunner.h`](../unitree_rl_lab/deploy/robots/b2w/include/RecurrentOrtRunner.h) - detects carry-over state from the graph by the rsl-rl `<x>_in` / `<x>_out` naming (MLP → 0 pairs, GRU → 1, LSTM → 2), seeds the hidden state to zero, feeds `*_in`, and carries `*_out` forward each step. Backward compatible: a stateless MLP finds 0 pairs and behaves exactly like the stock runner, so the rough/teacher policies still deploy unchanged.
+- One construction line in [`State_RLBase.cpp`](../unitree_rl_lab/deploy/robots/b2w/src/State_RLBase.cpp) switches the runner to it.
+
+Then rebuild `b2w_ctrl` and run sim2sim as in [Section 4.6](#46-step-3---sim2sim-in-mujoco).
+
+</details>
+
+
 ## 6. Evaluation Matrix
 
 The evaluation entry point is `scripts/evaluation/evaluation.py`. It is an orchestrator around `eval_worker.py`: the orchestrator finds checkpoints and decides which tasks to run, while `eval_worker.py` owns the Isaac rollout.
@@ -1742,7 +1740,7 @@ Useful options:
 | `--out_csv` | Output CSV path; default is `evaluation.csv` |
 | `--levels` | Number of terrain levels to test; default is `9` |
 | `--robots_per_level` | Number of robots spawned on each level; default is `512` |
-| `--duration_s` | Optional rollout length. If omitted, it is chosen from both terrain and robot count. At `512` robots per level, StaircaseUp/SlopeUp currently use `15s`. |
+| `--duration_s` | Optional rollout length. If omitted, it is chosen from both terrain and robot count. At `512` robots per level, every terrain (StaircaseUp/SlopeUp included) uses `20s`. |
 | `--headless` | Passes headless mode through to `eval_worker.py`. If omitted, the Isaac window can be shown so you can watch the evaluation. |
 
 ### 6.2 How it picks terrains
@@ -1767,7 +1765,7 @@ Each policy is cross-evaluated on the velocity terrains inferred from the policy
 
 - Robots start upright with zero reset velocity.
 - The per-step level-progression curriculum is disabled (robots are not promoted or demoted mid-eval), but the terrain generator's `curriculum=True` ordering is enabled, so each row is a fixed, monotonically increasing difficulty. The per-level rows therefore actually mean increasing difficulty (before, rows were randomly difficult).
-- Difficulty is swept across the level rows from `EVAL_DIFFICULTY_RANGE` (default `(0.9, 1.3)`): `1.0` is the hardest terrain seen in training, and values `>1.0` extrapolate the terrain parameters *beyond* training (taller steps, steeper slopes, with no clamp). The sweep deliberately runs harder than the training terrain.
+- Difficulty across the level rows is set by `EVAL_DIFFICULTY_RANGE` (default `(0.9, 0.9)`), where `1.0` is the hardest terrain seen in training. With the low and high both at `0.9`, every row runs at a fixed `0.9` of the trained max - just below the hardest training terrain. (Raising the high end above `1.0` would extrapolate the terrain parameters *beyond* training - taller steps, steeper slopes, with no clamp.)
 - The terrain keeps its trained column layout. For the B2W SlopeUp/StaircaseUp teacher terrains, this means `num_cols=20`; `512` robots per level are distributed across those columns instead of creating `512` terrain columns.
 - Velocity tasks use a fixed command by default: `x=0.6`, `y=0.0`, `yaw=0.0`.
 - Velocity tasks honour `--duration_s`/`--eval_duration_s` for the rollout length. The per-level CSV's `duration_s` records the length actually run.
@@ -1780,12 +1778,9 @@ Each policy is cross-evaluated on the velocity terrains inferred from the policy
 
 | Macro | Default | Meaning |
 |---|---|---|
-| `EVAL_DIFFICULTY_RANGE` | `(0.9, 1.3)` | Low/high difficulty fraction swept across the level rows; `>1.0` is beyond training |
-| `EVAL_BAND_SPLIT` | `1.0` | Levels with difficulty `<=` this are reported in the `train90` band, above in `beyond` |
+| `EVAL_DIFFICULTY_RANGE` | `(0.9, 0.9)` | Low/high difficulty fraction across the level rows; `>1.0` would be beyond training |
 | `EVAL_TRAVERSE_FRACTION` | `0.5` | Velocity-task success: fraction of terrain size the robot must walk from spawn (0.5 = ~4 m) |
 
-> difficulty 0.0  -> 0.04 m  
-> difficulty 1.0  -> 0.30 m  
 > difficulty 0.9  -> 0.04 + 0.9 * (0.30 - 0.04)  
 >                 -> 0.04 + 0.234  
 >                 -> 0.274 m  
@@ -1801,8 +1796,7 @@ The orchestrator launches `eval_worker.py` once per compatible `(policy, terrain
 | `policy` | Policy label, usually the experiment name without `unitree_b2w_` |
 | `terrain` | Terrain label, such as `StaircaseUp` or `SlopeUp` |
 | `terrain_level` | Difficulty level, written as `1` through `9` |
-| `difficulty` | Difficulty fraction of that level (e.g. `0.97`); `>1.0` is beyond training |
-| `band` | `train90` (difficulty `<= EVAL_BAND_SPLIT`) or `beyond` |
+| `difficulty` | Difficulty fraction of that level (e.g. `0.90`); `>1.0` would be beyond training |
 | `cleared` | Number of robots that succeeded on that level (distance-traverse) |
 | `total` | Number of robots tested on that level |
 | `success_rate` | `cleared / total` |
@@ -1825,7 +1819,7 @@ With the default `9` levels and `512` robots per level:
 summary_success_rate = (cleared_1 + cleared_2 + ... + cleared_9) / (512 * 9)
 ```
 
-> Note: the summative rate is a flat average over every robot in the sweep. With the default `EVAL_DIFFICULTY_RANGE=(0.9, 1.3)` most level rows sit in the `beyond` band, so the single number is intentionally weighted toward harder-than-training terrain.
+> Note: the summative rate is a flat average over every robot in the sweep. With the default `EVAL_DIFFICULTY_RANGE=(0.9, 0.9)` every level row runs at a fixed `0.9` of the trained max, so the single number reflects performance just below the hardest training terrain.
 
 ### 6.5 Files and Reasoning
 
@@ -1856,7 +1850,7 @@ summary_success_rate = (cleared_1 + cleared_2 + ... + cleared_9) / (512 * 9)
 2. Use it when you want keyboard control.
 3. Use it when you want to export `policy.onnx` or `policy.pt`.
 4. It does not force the strict evaluation setup above.
-5. This keeps play mode useful for visual inspection, while `evaluation.py` stays the repeatable measurement command.
+5. This keeps play mode useful for visual inspection, while `evaluation.py` is used for evaluating policies on different terrain.
 
 Relevant `play.py` behavior:
 
@@ -1872,13 +1866,28 @@ This section tracks which skills the policy has been trained on and which are pl
 
 ### 7.1 Successfully trained on
 
-Three velocity-tracking policies have been trained so far. All use the same RSL-RL PPO setup and terrain-difficulty curriculum (see [5.2](#52-sub-terrains-the-default-mix) and [5.3](#53-terrain-difficulty-curriculum)); they differ only in the terrain they practise on.
-
+#### Teacher Policies  
+The following are the expert policies that have been extensively trained for about 5000 iterations on specific tasks:
 | Policy | Terrain | Notes |
 |---|---|---|
 | **Rough** (`unitree_b2w_rough`, the default `v0` task) | Mixed rough terrain (stairs, boxes, rough ground, slopes) | The general-purpose baseline policy. |
-| **StaircaseUp teacher** (`unitree_b2w_staircaseup_teacher`) | Upward staircases only (step heights 4 cm → 30 cm) | Specialised stair-climbing teacher - see the worked example in [5.5](#55-worked-example-staircaseup-teacher). |
+| **StaircaseUp teacher** (`unitree_b2w_staircaseup_teacher`) | Upward staircases only (step height 6 cm → 20 cm, step width 27.5 cm) | Specialised stair-climbing teacher - see the worked example in [5.5](#55-worked-example-staircaseup-teacher). |
 | **SlopeUp teacher** (`unitree_b2w_slopeup_teacher`) | Upward slopes only (slope 0.0 → 0.50 rad, i.e. 0° → ~28.6°) | Specialised slope-climbing teacher; steeper than the rough task's ~22° slopes. |
+
+> **Real-stair sim2real note:** the StaircaseUp curriculum is tuned to the physical staircase in the hanger - step height **16.8 ± 0.3 cm** and step width **27.8 ± 0.4 cm**. The terrain (`staircaseup_teacher_env_cfg.py`) uses a step-height range of 6-20 cm and a fixed 27.5 cm tread, so the real rise lands near the top of the curriculum with a small margin above it, and the trained tread is slightly narrower than reality (marginally harder in sim than on the real stairs).
+
+#### Student Policies   
+Student policy exists at `/workspace/near-locomotion-quadruped/robot_lab/logs/rsl_rl/unitree_b2w_student`  
+The student was trained through the following method:
+
+#### Performance Table  
+
+Success rate (%) per terrain. Columns are the evaluated policies; rows are the test terrains.
+
+| Terrain | $\pi_{slope}$ | $\pi_{stair}$ | $\pi_{student}$ |
+|---|---|---|---|
+| SlopeUp | 98.9 | 63.1 | 92.1 |
+| StaircaseUp | 8.2 | 99.6 | 92.9 |
 
 ### 7.2 What we want to train on next
 
@@ -1965,11 +1974,48 @@ Walk these six files top-to-bottom and confirm each matches the source of truth 
 | 1 | [`unitree.py`](../robot_lab/source/robot_lab/robot_lab/assets/unitree.py#L248-L320) `UNITREE_B2W_CFG` | effort / saturation / velocity limits match the URDF table (§8.1); leg `stiffness=160`, `damping=5`; wheel `stiffness=0`, `damping=1`; default pose `hip=0, thigh=0.8, calf=-1.5, wheel=0` |
 | 2 | [`rough_env_cfg.py`](../robot_lab/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/unitree_b2w/rough_env_cfg.py#L99-L106) | action scales `hip=0.125`, `thigh/calf=0.25`, `wheel=5.0`; obs scales `base_ang_vel=0.25`, `joint_vel=0.05`; `base_lin_vel` and `height_scan` set to `None` (policy is blind) |
 | 3 | [`deploy.yaml`](../unitree_rl_lab/deploy/robots/b2w/config/deploy.yaml) | leg `stiffness=160` / `damping=5`, wheel `kp=0` / `kd=1`; `default_joint_pos` = §8.1 pose; action `scale`/`offset` = row 2; observation order + scales; `step_dt: 0.02` (= sim dt `0.005` × decimation `4`) |
-| 4 | [`config.yaml`](../unitree_rl_lab/deploy/robots/b2w/config/config.yaml) | FixStand **hold** gains `kp=400` / `kd=8` (intentionally stiffer than the policy gains - hold only, not the RL gains); stand pose `qs`; `policy_dir` -> `unitree_b2w_rough` |
+| 4 | [`config.yaml`](../unitree_rl_lab/deploy/robots/b2w/config/config.yaml) | FixStand **hold** gains `kp=400` / `kd=8` (intentionally stiffer than the policy gains - hold only, not the RL gains); stand pose `qs`; `policy_dir` -> `unitree_b2w_multiexpert` |
 | 5 | [`b2w.xml`](../unitree_mujoco/unitree_robots/b2w/b2w.xml) | joint `range` = URDF; actuator `ctrlrange` hip/thigh `±200`, calf `±320`, wheel `±20`; wheel `ref` (set to `0` for the nominal robot - a non-zero `ref` injects the FixStand wheel-skid repro, see [§9.1](#91-fixstand-wheel-skid---bug-that-passed-in-sim-but-failed-on-the-real-robot)) |
 | 6 | [`config.yaml` (MuJoCo)](../unitree_mujoco/simulate/config.yaml) | `robot: "b2w"`; `interface: "lo"` for sim2sim; `use_joystick: 0` for keyboard |
 
 > **Gain sources differ by FSM state - this is intentional.** FixStand (row 4) uses a stiff `kp=400/kd=8` position hold to stand the robot up. The Velocity (RL) state uses `kp=160/kd=5` from `deploy.yaml` (row 3), matching the training asset. Do not "reconcile" these two - they are different controllers.
+
+### 8.3 DCMotor Speed-Torque Matching in MuJoCo
+
+<details>
+<summary><b>Why the MuJoCo bridge now clamps leg torque by joint speed (B2W only)</b></summary>
+
+**Symptom.** The B2W climbed stairs cleanly in Isaac Sim but in MuJoCo sim2sim the legs were over-aggressive - the robot rushed the stairs and struggled to climb. Flat ground looked fine in both. Same policy, same controller, so the gap was in the simulator, not the policy.
+
+**Root cause - mismatched actuator models.** The B2W legs are trained with [`DCMotorCfg`](../robot_lab/source/robot_lab/robot_lab/assets/unitree.py#L285-L311) (§8.1), which models a real BLDC motor's speed-torque envelope: as a joint speeds up, the torque it can produce rolls off toward zero (back-EMF). Isaac Lab applies this every step:
+
+```
+τ_max =  saturation_effort · (1 − q̇ / velocity_limit)   clamped to [0, effort_limit]
+τ_min =  saturation_effort · (−1 − q̇ / velocity_limit)  clamped to [−effort_limit, 0]
+τ     =  clip(τ_pd, τ_min, τ_max)
+```
+
+MuJoCo's `<motor>` actuator has **no such rolloff** - it is an idealised torque source with only a constant `ctrlrange` clamp (`±200/±320`). The bridge ([`unitree_sdk2_bridge.h`](../unitree_mujoco/simulate/src/unitree_sdk2_bridge.h)) computed plain PD torque and wrote it straight to `ctrl[i]`. So during fast leg swings on stairs the MuJoCo legs delivered far more torque than the policy ever saw in training (and more than the real motor can), producing the over-driven motion. On flat ground joint speeds are low, the rolloff barely engages, and both sims agree - which is why only stairs exposed it.
+
+This is the same reason go2w transfers without this fix: go2w trains with `ImplicitActuatorCfg` (plain clamped PD = what the bridge already did), so its training and sim2sim actuator models already agree. B2W's `DCMotorCfg` did not.
+
+**Fix (Option A - make MuJoCo match training, no retrain).** The bridge now reproduces the DCMotor envelope for the B2W leg joints before writing `ctrl[i]`. See `apply_dcmotor_limit()` and the PD loop in [`unitree_sdk2_bridge.h`](../unitree_mujoco/simulate/src/unitree_sdk2_bridge.h):
+
+```cpp
+double tau = m.tau()
+           + m.kp() * (m.q()  - mj_data_->sensordata[i])
+           + m.kd() * (m.dq() - joint_vel);
+mj_data_->ctrl[i] = apply_dcmotor_limit(i, tau, joint_vel);   // B2W legs only; no-op otherwise
+```
+
+- **Scoped to B2W legs.** The helper returns the torque unchanged unless `robot == "b2w"` and the joint is a leg (index `[0,12)`). Wheels (`ImplicitActuatorCfg`) and every other robot are untouched.
+- **Parameters mirror §8.1.** hip/thigh: `saturation_effort=effort_limit=200`, `velocity_limit=23`; calf: `320`, `velocity_limit=14`. If you ever change these in `unitree.py`, change them here too - they must stay in lockstep.
+
+**Why Option A and not retraining with `ImplicitActuatorCfg` (Option B)?** Option B would make the two sims agree, but on the *optimistic* model - the policy would learn torque the real motor cannot deliver, reintroducing the same gap on hardware. The real motor has the rolloff (via physics), so keeping `DCMotorCfg` in training and mirroring it in MuJoCo keeps the whole chain (Isaac → MuJoCo → real) consistent. Validity depends on `saturation_effort`/`velocity_limit` matching the real B2 datasheet - they are cross-checked against the URDF in §8.1.
+
+> **Note - the Python bridge is not patched.** This repo's sim2sim path uses the C++ simulator (§3.2). The mirror file [`simulate_python/unitree_sdk2py_bridge.py`](../unitree_mujoco/simulate_python/unitree_sdk2py_bridge.py) still does plain PD; apply the same clamp there if you switch to the Python simulator.
+
+</details>
 
 ---
 
@@ -2924,6 +2970,136 @@ From `train.py`,
       ```
 
 > **What actually differs from the MLP run:** `act()`, the rollout loop, and `update()` are the *same generic code*. With the LSTM student the hidden-state machinery inside them (`student.reset(...)`, `detach_hidden_state(...)`, and the `gradient_length`-windowed TBPTT) stops being a no-op and starts carrying/cutting the `h`/`c` state across timesteps. The recurrent config also retunes the algorithm for this: `gradient_length = 24` (widen the TBPTT window to the full rollout so the student integrates a gait cycle of history for velocity inference) and `max_grad_norm = 1.0` (clip BPTT gradients that would otherwise explode through the unrolled LSTM). See [Teacher-Student Distillation Training](#121-teacher-student-distillation-training) and the [RSL-RL DAgger `update()`](#1223-rsl-rl-implementation-dagger) walkthrough for the hidden-state calls.
+
+</details>
+
+### 13.4 Multi-Expert Distillation (LSTM Student)
+
+<details>
+<summary>Click to expand the multi-expert LSTM student walkthrough</summary>
+
+This is the run from [Section 5.6](#56-multi-expert-terrain): one LSTM student distilled from **N frozen MLP experts** at once, each env supervised by the expert matching its terrain. The student is identical to [Section 13.3](#133-distillation-lstm-student); only the **algorithm** changes - `MultiTeacherDistillation` (a subclass of RSL-RL `Distillation`) holds N teachers instead of one and routes supervision per env. From `train.py`,
+
+1. [Line 88](../robot_lab/scripts/reinforcement_learning/rsl_rl/train.py#L88): Note `DistillationRunner` is just there to act as guard for <u>point 4</u>
+
+   ```python
+   from rsl_rl.runners import DistillationRunner, OnPolicyRunner
+   ```
+
+2. [Line 207-208](../robot_lab/scripts/reinforcement_learning/rsl_rl/train.py#L207-L208):
+
+   ```python
+   runner = DistillationRunner(env, agent_cfg.to_dict(), log_dir=log_dir, device=agent_cfg.device)
+   ```
+
+   a. From here `DistillationRunner` has no `__init__`, so `OnPolicyRunner.__init__`
+
+   b. [Line 39-40](../../../isaac-sim/kit/python/lib/python3.11/site-packages/rsl_rl/runners/on_policy_runner.py#L39-L40) of `on_policy_runner.py`:
+
+      ```python
+      alg_class: type[PPO] = resolve_callable(self.cfg["algorithm"]["class_name"])
+      self.alg = alg_class.construct_algorithm(obs, self.env, self.cfg, self.device)
+      ```
+
+      1. The difference starts here. `cfg["algorithm"]["class_name"]` is **not** the plain `"Distillation"` - it is the dotted path `robot_lab...multiteacher.MultiTeacherDistillation` (set by `rsl_rl_multiexpert_distillation_cfg.py`). So `resolve_callable` imports our subclass and calls [`MultiTeacherDistillation.construct_algorithm()`](../robot_lab/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/distillation/multiteacher.py#L77-L117) instead of the stock one.
+      2. As in [Section 13.3](#133-distillation-lstm-student), the **student** is an `RNNModel` (LSTM, holds hidden state `h`/`c`) and the **teacher** class is the MLP actor. But the teachers are loaded *here*, from the env cfg, not from a single `--load_run` checkpoint - [`multiteacher.py` line 86-103](../robot_lab/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/distillation/multiteacher.py#L86-L103):
+
+         ```python
+         env_cfg = env.unwrapped.cfg
+         ckpts: list[str] = env_cfg.teacher_checkpoints      # one per teachers.txt line
+         column_to_expert: list[int] = env_cfg.column_to_expert
+
+         student = student_class(obs, cfg["obs_groups"], "student", env.num_actions, **cfg["student"]).to(device)
+         teachers = []
+         for path in ckpts:
+             teacher_kwargs = copy.deepcopy(cfg["teacher"])   # ctor pops nested keys; deep-copy per teacher
+             t = teacher_class(obs, cfg["obs_groups"], "teacher", env.num_actions, **teacher_kwargs).to(device)
+             sd = torch.load(path, map_location=device, weights_only=False)
+             t.load_state_dict(sd.get("teacher_state_dict") or sd["actor_state_dict"], strict=True)
+             t.eval()
+             teachers.append(t)
+         ```
+
+      3. The constructor then maps **each env to its expert** from the static terrain column assignment - [`multiteacher.py` line 24-36](../robot_lab/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/distillation/multiteacher.py#L24-L36). `super().__init__(student, teachers[0], ...)` reuses the base `Distillation` setup (student optimizer, storage, loss); `teachers[0]` is just a stand-in for `self.teacher`. The real list is `self.teachers`, and `self.expert_ids` is a `[num_envs]` tensor giving the expert id for every robot:
+
+         ```python
+         super().__init__(student, teachers[0], storage, **kwargs)
+         self.teachers = nn.ModuleList(teachers).to(self.device)
+         terrain = env.unwrapped.scene.terrain
+         col2exp = torch.as_tensor(column_to_expert, dtype=torch.long, device=self.device)
+         self.expert_ids = col2exp[terrain.terrain_types.to(self.device)]  # [num_envs]
+         self.teacher_loaded = True
+         ```
+
+3. [Line 214-217](../robot_lab/scripts/reinforcement_learning/rsl_rl/train.py#L214-L217):
+
+   ```python
+   if agent_cfg.resume or agent_cfg.algorithm.class_name == "Distillation":
+       print(f"[INFO]: Loading model checkpoint from: {resume_path}")
+       runner.load(resume_path)
+   ```
+
+   a. **This branch is skipped.** `agent_cfg.algorithm.class_name` is the dotted `MultiTeacherDistillation` path, not the literal `"Distillation"`, and `resume` is False on a fresh run. So `runner.load()` is **not** called and `--load_run` is not required - the teachers were already loaded inside `construct_algorithm()` in <u>point 2b</u>. (Contrast [Section 13.3](#133-distillation-lstm-student) point 3, where the single teacher is loaded via `runner.load()`.)
+
+4. [Line 224](../robot_lab/scripts/reinforcement_learning/rsl_rl/train.py#L224):
+
+   ```python
+   runner.learn(num_learning_iterations=agent_cfg.max_iterations, init_at_random_ep_len=True)
+   ```
+
+   a. Overriden by `distillation_runner.py`, the one method it overrides. Which just acts as a guard to check whether teacher is loaded (here `self.teacher_loaded = True` is set in the constructor, so the guard passes).
+
+   b. [Line 66](../../../isaac-sim/kit/python/lib/python3.11/site-packages/rsl_rl/runners/on_policy_runner.py#L66) in `on_policy_runner` calls `train_mode()`, overridden in [`multiteacher.py` line 56-59](../robot_lab/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/distillation/multiteacher.py#L56-L59) to put the student in train and **every** teacher in eval:
+
+      ```python
+      def train_mode(self) -> None:
+          self.student.train()
+          for t in self.teachers:
+              t.eval()
+      ```
+
+   c. [Line 76 - 105](../../../isaac-sim/kit/python/lib/python3.11/site-packages/rsl_rl/runners/on_policy_runner.py#L76-L105) is the entire training process - the *same generic loop* as PPO/Distillation. The only methods that change are the two it calls, both overridden in `multiteacher.py`:
+
+      1. `act()` ([line 38-44](../robot_lab/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/distillation/multiteacher.py#L38-L44)) - the student acts as usual, but the supervision target is **gathered per env** from the matching expert. All N teachers run on the full obs, then `expert_ids` selects each env's column:
+
+         ```python
+         def act(self, obs: TensorDict) -> torch.Tensor:
+             self.transition.actions = self.student(obs, stochastic_output=True).detach()
+             targets = torch.stack([t(obs) for t in self.teachers], dim=0)        # [E, N, A]
+             idx = self.expert_ids.view(1, -1, 1).expand(1, -1, targets.shape[-1]) # [1, N, A]
+             self.transition.privileged_actions = targets.gather(0, idx).squeeze(0).detach()
+             self.transition.observations = obs
+             return self.transition.actions
+         ```
+
+      2. `process_env_step()` ([line 46-54](../robot_lab/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/distillation/multiteacher.py#L46-L54)) - stores the transition and resets hidden state on `dones` for the student **and every teacher** (same LSTM hidden-state machinery as [Section 13.3](#133-distillation-lstm-student), now looped over all experts):
+
+         ```python
+         self.student.reset(dones)
+         for t in self.teachers:
+             t.reset(dones)
+         ```
+
+   d. Subsequently in [line 108](../../../isaac-sim/kit/python/lib/python3.11/site-packages/rsl_rl/runners/on_policy_runner.py#L108), the inherited `update()` runs the MSE loss between student actions and the per-env `privileged_actions`, then backprops - identical to [Section 13.3](#133-distillation-lstm-student), including the `gradient_length = 24` TBPTT window and `max_grad_norm = 1.0` clipping.
+
+      ```python
+      # Update policy
+      loss_dict = self.alg.update()
+      ```
+
+5. On save, `save()` ([line 66-75](../robot_lab/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/distillation/multiteacher.py#L66-L75)) writes the `student_state_dict` plus a per-expert `teacher_<i>_state_dict`, and keeps a plain `teacher_state_dict` (= teacher 0) so the stock single-teacher loader and `play.py` stay happy:
+
+   ```python
+   saved = {
+       "student_state_dict": self.student.state_dict(),
+       "optimizer_state_dict": self.optimizer.state_dict(),
+       "teacher_state_dict": self.teachers[0].state_dict(),
+   }
+   for i, t in enumerate(self.teachers):
+       saved[f"teacher_{i}_state_dict"] = t.state_dict()
+   ```
+
+> **What actually differs from the single-teacher LSTM run ([Section 13.3](#133-distillation-lstm-student)):** the runner, rollout loop, and `update()` are unchanged. Only the algorithm swaps to `MultiTeacherDistillation`, which (i) loads N MLP teachers from `teachers.txt` inside `construct_algorithm()` instead of one via `runner.load()` - so the `train.py` load branch is skipped and `--load_run` is not needed, (ii) builds a `[num_envs]` `expert_ids` map from the terrain columns, and (iii) in `act()`/`process_env_step()`/`save()` routes the supervision target per env and resets/saves every teacher. The student and its LSTM hidden-state handling are exactly as in Section 13.3. See [Section 5.6](#56-multi-expert-terrain) for how `teachers.txt` builds the combined terrain and `column_to_expert` map.
 
 </details>
 
