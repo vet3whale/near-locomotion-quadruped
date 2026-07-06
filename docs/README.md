@@ -35,11 +35,12 @@ RL policy trained in `robot_lab` --> exported to ONNX via `play.py` --> C++ cont
     <li><a href="#41-step-1---train-teacher-in-isaac-lab">4.1 Step 1 - Train Teacher in Isaac Lab</a></li>
     <li><a href="#42-step-1b---watch-the-robot-walk-in-isaac-sim">4.2 Step 1b - Watch the Robot Walk in Isaac Sim</a></li>
     <li><a href="#43-step-1c---distillation-student-teacher">4.3 Step 1c - Distillation (Student-Teacher)</a></li>
-    <li><a href="#44-step-2---export-to-onnx">4.4 Step 2 - Export to ONNX</a></li>
-    <li><a href="#45-step-2a---evaluate-policies-per-level-evaluation-csv">4.5 Step 2a - Evaluate Policies (Per-Level Evaluation CSV)</a></li>
-    <li><a href="#46-step-3---sim2sim-in-mujoco">4.6 Step 3 - Sim2Sim in MuJoCo</a></li>
-    <li><a href="#47-step-3b---generate-rough-terrain">4.7 Step 3b - Generate rough terrain</a></li>
-    <li><a href="#48-step-4---sim2real-to-be-tested">4.8 Step 4 - Sim2Real (to be tested)</a></li>
+    <li><a href="#44-step-1d---rl-fine-tuning-stage-3">4.4 Step 1d - RL Fine-Tuning (Stage 3)</a></li>
+    <li><a href="#45-step-2---export-to-onnx">4.5 Step 2 - Export to ONNX</a></li>
+    <li><a href="#46-step-2a---evaluate-policies-per-level-evaluation-csv">4.6 Step 2a - Evaluate Policies (Per-Level Evaluation CSV)</a></li>
+    <li><a href="#47-step-3---sim2sim-in-mujoco">4.7 Step 3 - Sim2Sim in MuJoCo</a></li>
+    <li><a href="#48-step-3b---generate-rough-terrain">4.8 Step 3b - Generate rough terrain</a></li>
+    <li><a href="#49-step-4---sim2real-to-be-tested">4.9 Step 4 - Sim2Real (to be tested)</a></li>
   </ul></details></li>
   <li><details><summary><a href="#5-curriculum-training-with-different-terrain">5. Curriculum Training with Different Terrain</a></summary><ul>
     <li><a href="#51-training-command">5.1 Training Command</a></li>
@@ -96,6 +97,7 @@ RL policy trained in `robot_lab` --> exported to ONNX via `play.py` --> C++ cont
     <li><a href="#132-distillation-mlp-student">13.2 Distillation (MLP Student)</a></li>
     <li><a href="#133-distillation-lstm-student">13.3 Distillation (LSTM Student)</a></li>
     <li><a href="#134-multi-expert-distillation-lstm-student">13.4 Multi-Expert Distillation (LSTM Student)</a></li>
+    <li><a href="#135-rl-fine-tuning-ppo-warm-started-lstm-actor">13.5 RL Fine-Tuning (PPO, warm-started LSTM actor)</a></li>
   </ul></details></li>
 </ul>
 
@@ -301,7 +303,7 @@ robot_lab/logs/rsl_rl/unitree_b2w_multiexpert/<latest-timestamp>/exported/policy
 
 **IMPORTANT**: Set which policy the controller deploys (for sim2sim or sim2real) by opening `unitree_rl_lab/deploy/robots/b2w/config/config.yaml` and editing `policy_dir` to point at the log root of the run you want.   
 `parser_policy_dir` function in controller automatically finds most recent timestamp subdirectory that contains an `exported/` folder and loads `policy.onnx` from it.  
-See [Step 2 - Export to ONNX](#44-step-2---export-to-onnx) to generate `.onnx` file from a `.pt` checkpoint.
+See [Step 2 - Export to ONNX](#45-step-2---export-to-onnx) to generate `.onnx` file from a `.pt` checkpoint.
 
 **Shared deploy config** (loaded by the controller at startup): This is the yaml used when the robot is in Velocity state.
 ```
@@ -913,7 +915,7 @@ python scripts/reinforcement_learning/rsl_rl/play.py \
 
 > **Verify each expert before distillation.** Do not start distillation until you have visually confirmed that every teacher actually performs its skill well - a weak teacher distils into a weak student. Check each expert in **both** environments:
 > - **Isaac Sim** - the `play.py` run above; watch the teacher climb/ascend its terrain cleanly under keyboard control.
-> - **MuJoCo sim2sim** - follow [Section 4.6 - Sim2Sim in MuJoCo](#46-step-3---sim2sim-in-mujoco) to confirm the same behaviour survives the sim2sim transfer.
+> - **MuJoCo sim2sim** - follow [Section 4.7 - Sim2Sim in MuJoCo](#47-step-3---sim2sim-in-mujoco) to confirm the same behaviour survives the sim2sim transfer.
 >
 > If a teacher is timid, drifts, or falls, tweak its rewards and retrain before distilling. See [Section 5 - Curriculum Training with Different Terrain](#5-curriculum-training-with-different-terrain) (e.g. [5.5 Worked example: StaircaseUp teacher](#55-worked-example-staircaseup-teacher)) for exactly which rewards were tuned and why.
 
@@ -943,7 +945,7 @@ python scripts/reinforcement_learning/rsl_rl/train.py \
 ```
 
 No `--load_run` is needed here. Teacher checkpoints come from `teachers.txt`.  
-Students land in `logs/rsl_rl/unitree_b2w_multiexpert/`. How `teachers.txt` is parsed and the code behind it is in [Section 5.6 - Multi-Expert Terrain](#56-multi-expert-terrain); scoring the student on each teacher's terrain is in [Section 4.5](#45-step-2a---evaluate-policies-per-level-evaluation-csv).
+Students land in `logs/rsl_rl/unitree_b2w_multiexpert/`. How `teachers.txt` is parsed and the code behind it is in [Section 5.6 - Multi-Expert Terrain](#56-multi-expert-terrain); scoring the student on each teacher's terrain is in [Section 4.6](#46-step-2a---evaluate-policies-per-level-evaluation-csv).
 
 <details>
 <summary><strong>Code Changes (LSTM student cfg)</strong></summary>
@@ -989,7 +991,46 @@ Omit `--load_run` to auto-load the most recent `unitree_b2w_multiexpert` run. Dr
 > ```
 
 
-### 4.4 Step 2 - Export to ONNX
+### 4.4 Step 1d - RL Fine-Tuning (Stage 3)
+
+Stage 3 takes the distilled multi-expert LSTM student from [Step 1c](#43-step-1c---distillation-student-teacher) and improves it with PPO on the same broad multi-expert terrain set. This follows the *Parkour in the Wild* recipe: warm-start the PPO actor from `student_state_dict`, keep the student's low action std, train a privileged critic from scratch, freeze the actor for an initial critic warmup, then unfreeze with conservative PPO settings.
+
+Prerequisites: [`teachers.txt`](../robot_lab/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/unitree_b2w/teachers.txt) must still point at valid teacher checkpoints because the finetune env reuses the merged terrain builder, and a completed Stage-2 student must exist under `robot_lab/logs/rsl_rl/unitree_b2w_multiexpert/`. Override the student source with `STUDENT_CKPT=/path/to/model_or_run_dir` when needed.
+
+<details>
+<summary><strong>Train / play / evaluate the Stage-3 policy</strong></summary>
+
+Full run:
+
+```bash
+setup_isaaclab
+cd /workspace/near-locomotion-quadruped/robot_lab
+STUDENT_CKPT=logs/rsl_rl/unitree_b2w_multiexpert \
+python scripts/reinforcement_learning/rsl_rl/train.py \
+  --task=RobotLab-Isaac-Velocity-MultiExpert-Finetune-Unitree-B2W-v0 \
+  --headless --max_iterations 3000
+```
+
+Play/export uses the normal PPO entry point; no distillation `--agent` flag is needed:
+
+```bash
+python scripts/reinforcement_learning/rsl_rl/play.py \
+  --task=RobotLab-Isaac-Velocity-MultiExpert-Finetune-Unitree-B2W-v0 \
+  --num_envs 1 --keyboard
+```
+
+Compare against the distilled student with the evaluation matrix:
+
+```bash
+python scripts/evaluation/evaluation.py \
+  --policies unitree_b2w_multiexpert_finetune unitree_b2w_multiexpert \
+  --headless
+```
+
+</details>
+
+
+### 4.5 Step 2 - Export to ONNX
 
 Running `play.py` auto-exports `policy.onnx` into an `exported/` subfolder next to the loaded checkpoint.
 
@@ -1022,7 +1063,7 @@ The exported policy will be at:
 /workspace/near-locomotion-quadruped/robot_lab/logs/rsl_rl/unitree_b2w_multiexpert/<timestamp>/exported/policy.onnx
 ```
 
-### 4.5 Step 2a - Evaluate Policies (Per-Level Evaluation CSV)
+### 4.6 Step 2a - Evaluate Policies (Per-Level Evaluation CSV)
 
 Once you have more than one trained policy, use the orchestrator in `scripts/evaluation/evaluation.py`. Give it policy experiment names, run folders, or checkpoint paths, and it resolves the newest checkpoint from `logs/rsl_rl/`.
 
@@ -1056,7 +1097,7 @@ python scripts/evaluation/evaluation.py \
 > The `unitree_b2w_multiexpert` checkpoint is a **distillation** checkpoint (it stores `student_state_dict`, not `actor_state_dict`). [`evaluation.py`](../robot_lab/scripts/evaluation/evaluation.py) maps that experiment to the distillation agent entry point automatically, so the deployable LSTM student is loaded and scored - no extra flags needed.
 
 
-### 4.6 Step 3 - Sim2Sim in MuJoCo
+### 4.7 Step 3 - Sim2Sim in MuJoCo
 
 > **Verify config first.** Before this sim2sim run, confirm the B2W physical parameters, gains, scales, and observation layout match across all configs - see [§8. B2W Config (Verify Before Sim2Real)](#8-b2w-config-verify-before-sim2real). A mismatch here is the most common cause of a policy that walks in Isaac Sim but falls in MuJoCo.
 
@@ -1126,7 +1167,7 @@ automatically and reads `deploy.yaml` from `config/`.
 
 > No rebuild needed here, as just tweaking yaml file. Latest .onnx file from the logs/<task> will be obtained.
 
-### 4.7 Step 3b - Generate rough terrain
+### 4.8 Step 3b - Generate rough terrain
 
 Check how to set it up under [B2W MuJoCo Sim2Sim Validation → Terrain Generation](#34-terrain-generation).
 
@@ -1135,7 +1176,7 @@ Check how to set it up under [B2W MuJoCo Sim2Sim Validation → Terrain Generati
 
 ---
 
-### 4.8 Step 4 - Sim2Real (to be tested)
+### 4.9 Step 4 - Sim2Real (to be tested)
 
 > **Verify config first.** Before running on the real robot, walk the full checklist in [§8. B2W Config (Verify Before Sim2Real)](#8-b2w-config-verify-before-sim2real) and confirm every value matches the [official `unitree_ros` B2W URDF](https://github.com/unitreerobotics/unitree_ros/tree/master/robots/b2w_description).
 
@@ -1153,7 +1194,7 @@ The E-Stop Button is **X** on the laptop, after deploying the policy.
 
 #### Prerequisites
 
-- `b2w_ctrl` already builds and runs cleanly in [sim2sim](#46-step-3---sim2sim-in-mujoco) (so the
+- `b2w_ctrl` already builds and runs cleanly in [sim2sim](#47-step-3---sim2sim-in-mujoco) (so the
   controller, `unitree_sdk2`, and the ONNX Runtime symlink are all set up).
 - The physical B2W is powered on and sitting on the ground. It does not need to be put in any
   special low-level mode - the controller claims the motor channel on startup, and `f` stands it up.
@@ -1161,7 +1202,7 @@ The E-Stop Button is **X** on the laptop, after deploying the policy.
 #### 1. Export the multiexpert student policy to ONNX
 
 To deploy onto the robot, need `.onnx` format file.
-See [Step 2 - Export to ONNX](#44-step-2---export-to-onnx) for details.
+See [Step 2 - Export to ONNX](#45-step-2---export-to-onnx) for details.
 
 #### 2. Confirm the controller points at the multiexpert student logs
 
@@ -1663,7 +1704,7 @@ RobotLab-Isaac-Velocity-SlopeUp-Teacher-Unitree-B2W-v0      /abs/.../unitree_b2w
 
 At startup the combined env reads the file, merges every expert's sub-terrains into one curriculum terrain, and computes a **column → expert** map (using the terrain generator's deterministic column formula) so each robot is supervised by the expert for the terrain it stands on. **Add an expert = add a line** - the terrain and routing reshape automatically.
 
-Train it as shown in [Section 4.3](#43-step-1c---distillation-student-teacher); students land in `logs/rsl_rl/unitree_b2w_multiexpert/`. Score the student per terrain in [Section 4.5](#45-step-2a---evaluate-policies-per-level-evaluation-csv).
+Train it as shown in [Section 4.3](#43-step-1c---distillation-student-teacher); students land in `logs/rsl_rl/unitree_b2w_multiexpert/`. Score the student per terrain in [Section 4.6](#46-step-2a---evaluate-policies-per-level-evaluation-csv).
 
 <details>
 <summary><strong>Multi-expert training - code changes</strong></summary>
@@ -1693,7 +1734,7 @@ Fix (b2w-local, shared deploy library untouched):
 - New [`RecurrentOrtRunner.h`](../unitree_rl_lab/deploy/robots/b2w/include/RecurrentOrtRunner.h) - detects carry-over state from the graph by the rsl-rl `<x>_in` / `<x>_out` naming (MLP → 0 pairs, GRU → 1, LSTM → 2), seeds the hidden state to zero, feeds `*_in`, and carries `*_out` forward each step. Backward compatible: a stateless MLP finds 0 pairs and behaves exactly like the stock runner, so the rough/teacher policies still deploy unchanged.
 - One construction line in [`State_RLBase.cpp`](../unitree_rl_lab/deploy/robots/b2w/src/State_RLBase.cpp) switches the runner to it.
 
-Then rebuild `b2w_ctrl` and run sim2sim as in [Section 4.6](#46-step-3---sim2sim-in-mujoco).
+Then rebuild `b2w_ctrl` and run sim2sim as in [Section 4.7](#47-step-3---sim2sim-in-mujoco).
 
 </details>
 
@@ -1888,6 +1929,25 @@ Success rate (%) per terrain. Columns are the evaluated policies; rows are the t
 |---|---|---|---|
 | SlopeUp | 98.9 | 63.1 | 92.1 |
 | StaircaseUp | 8.2 | 99.6 | 92.9 |
+
+#### Wandb Run Links
+Entity `vet3`. Exact runs chosen for the report and their context:
+
+- **Student - 2 teachers** (staircaseup + slopeup) - `b2w_multiexpert/1xy7skcm`:
+  https://wandb.ai/vet3/b2w_multiexpert/runs/1xy7skcm/overview
+- **Student - 3 teachers** (staircaseup + slopeup + rough_v1) - `b2w_multiexpert/s8g5f228`:
+  https://wandb.ai/vet3/b2w_multiexpert/runs/s8g5f228/overview
+- **Staircase-up teacher** (`2026-06-22_03-50-54`, model_6497) - `b2w-staircaseup-teacher/5ljhqjd5`:
+  https://wandb.ai/vet3/b2w-staircaseup-teacher/runs/5ljhqjd5/overview
+- **Slope-up teacher** (`2026-06-22_05-52-28`) - `b2w-slopeup-teacher/4lsu3gsa`:
+  https://wandb.ai/vet3/b2w-slopeup-teacher/runs/4lsu3gsa
+- **Rough-v1 teacher** (3rd expert used by `s8g5f228`) - project `b2w-rough-v1`:
+  https://wandb.ai/vet3/b2w-rough-v1
+
+Note: `1xy7skcm` is distilled from exactly the staircaseup (`5ljhqjd5`) and slopeup (`4lsu3gsa`)
+teachers above, so {`5ljhqjd5`, `4lsu3gsa`, `1xy7skcm`} is a self-consistent 2-teacher set.
+`s8g5f228` adds the `b2w-rough-v1` expert as a third teacher.
+
 
 ### 7.2 What we want to train on next
 
@@ -3102,5 +3162,23 @@ This is the run from [Section 5.6](#56-multi-expert-terrain): one LSTM student d
 > **What actually differs from the single-teacher LSTM run ([Section 13.3](#133-distillation-lstm-student)):** the runner, rollout loop, and `update()` are unchanged. Only the algorithm swaps to `MultiTeacherDistillation`, which (i) loads N MLP teachers from `teachers.txt` inside `construct_algorithm()` instead of one via `runner.load()` - so the `train.py` load branch is skipped and `--load_run` is not needed, (ii) builds a `[num_envs]` `expert_ids` map from the terrain columns, and (iii) in `act()`/`process_env_step()`/`save()` routes the supervision target per env and resets/saves every teacher. The student and its LSTM hidden-state handling are exactly as in Section 13.3. See [Section 5.6](#56-multi-expert-terrain) for how `teachers.txt` builds the combined terrain and `column_to_expert` map.
 
 </details>
+
+### 13.5 RL Fine-Tuning (PPO, warm-started LSTM actor)
+
+<details>
+<summary>Click to expand the Stage-3 PPO fine-tuning walkthrough</summary>
+
+Stage 3 is registered as `RobotLab-Isaac-Velocity-MultiExpert-Finetune-Unitree-B2W-v0`. The runner is a normal `RslRlOnPolicyRunnerCfg`, but its algorithm `class_name` points at [`FinetunePPO`](../robot_lab/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/finetune/finetune_ppo.py), so `PPO.construct_algorithm()` is replaced without editing `train.py`.
+
+`FinetunePPO.construct_algorithm()` builds the recurrent actor, privileged critic, obs groups, RND/symmetry config, and `RolloutStorage` the same way stock PPO does. The one added step is loading `env.unwrapped.cfg.student_checkpoint` and applying `actor.load_state_dict(sd["student_state_dict"], strict=True)`, which turns the distilled LSTM student into the PPO actor. The actor architecture in [`rsl_rl_multiexpert_finetune_cfg.py`](../robot_lab/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/unitree_b2w/agents/rsl_rl_multiexpert_finetune_cfg.py) matches the Stage-2 student byte-for-byte.
+
+`train.py` still skips its `runner.load()` branch on a fresh run because `resume=False` and the algorithm class is the dotted `FinetunePPO` path, not the literal `Distillation`. That keeps the warm-start local to `construct_algorithm()` and avoids needing `--load_run`.
+
+During `update()`, the actor parameters stay frozen for `freeze_actor_iters` updates so the privileged critic can learn values for the distilled policy before policy gradients perturb it. When the counter reaches the warmup limit, the actor is unfrozen and the optimizer LR is reset to the configured base LR, undoing adaptive-KL drift from the frozen period.
+
+The output checkpoint is a standard PPO checkpoint with `actor_state_dict`, `critic_state_dict`, and `optimizer_state_dict`. That means `play.py`, ONNX export, and the recurrent deployment runner treat the fine-tuned policy like any other PPO actor. The auto-wiring is contained in four files: `mdp/finetune/finetune_ppo.py`, `multiexpert_finetune_env_cfg.py`, `agents/rsl_rl_multiexpert_finetune_cfg.py`, and the B2W task registration in `__init__.py`.
+
+</details>
+
 
 ---
