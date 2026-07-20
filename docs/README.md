@@ -1,6 +1,6 @@
 # Training to Deployment Pipeline for Unitree B2W (near-locomotion-quadruped repo)
 
-> **Branch:** this documentation lives on the `b2w-rough-walking` branch of the main repo.
+> **Branch:** this documentation lives on the `b2w-distillation-training` branch of the main repo.
 
 The B2W has 16 DOF: 12 leg joints (FR/FL/RR/RL × hip/thigh/calf) controlled by position PD, and 4 wheel joints (FR/FL/RR/RL foot). Three submodule repos work together:
 
@@ -21,7 +21,6 @@ RL policy trained in `robot_lab` --> exported to ONNX via `play.py` --> C++ cont
     <li><a href="#22-what-the-container-downloads">2.2 What the Container Downloads</a></li>
     <li><a href="#23-quick-start---dev-container">2.3 Quick Start - Dev Container</a></li>
     <li><a href="#24-shell-functions">2.4 Shell Functions</a></li>
-    <li><a href="#25-reference-----load_actor_only-flag">2.5 Reference - <code>--load_actor_only</code> flag</a></li>
   </ul></details></li>
   <li><details><summary><a href="#3-mujoco-sim2sim-validation-setup">3. MuJoCo Sim2Sim Validation Setup</a></summary><ul>
     <li><a href="#31-overview">3.1 Overview</a></li>
@@ -35,7 +34,7 @@ RL policy trained in `robot_lab` --> exported to ONNX via `play.py` --> C++ cont
     <li><a href="#41-step-1---train-teacher-in-isaac-lab">4.1 Step 1 - Train Teacher in Isaac Lab</a></li>
     <li><a href="#42-step-1b---watch-the-robot-walk-in-isaac-sim">4.2 Step 1b - Watch the Robot Walk in Isaac Sim</a></li>
     <li><a href="#43-step-1c---distillation-student-teacher">4.3 Step 1c - Distillation (Student-Teacher)</a></li>
-    <li><a href="#44-step-1d---rl-fine-tuning-stage-3">4.4 Step 1d - RL Fine-Tuning (Stage 3)</a></li>
+    <li><a href="#44-policy-generations-and-support-matrix">4.4 Policy Generations and Support Matrix</a></li>
     <li><a href="#45-step-2---export-to-onnx">4.5 Step 2 - Export to ONNX</a></li>
     <li><a href="#46-step-2a---evaluate-policies-per-level-evaluation-csv">4.6 Step 2a - Evaluate Policies (Per-Level Evaluation CSV)</a></li>
     <li><a href="#47-step-3---sim2sim-in-mujoco">4.7 Step 3 - Sim2Sim in MuJoCo</a></li>
@@ -47,19 +46,17 @@ RL policy trained in `robot_lab` --> exported to ONNX via `play.py` --> C++ cont
     <li><a href="#52-sub-terrains-the-default-mix">5.2 Sub-Terrains (the default mix)</a></li>
     <li><a href="#53-terrain-difficulty-curriculum">5.3 Terrain Difficulty Curriculum</a></li>
     <li><a href="#54-plug-in-a-different-terrain">5.4 Plug in a different terrain</a></li>
-    <li><a href="#55-worked-example-staircaseup-teacher">5.5 Worked example: StaircaseUp teacher</a></li>
+    <li><a href="#55-worked-example-rough-v1-walking-policy-expert">5.5 Worked example: rough-v1 walking policy expert</a></li>
     <li><a href="#56-multi-expert-terrain">5.6 Multi-Expert Terrain</a></li>
   </ul></details></li>
   <li><details><summary><a href="#6-evaluation-matrix">6. Evaluation Matrix</a></summary><ul>
     <li><a href="#61-command">6.1 Command</a></li>
-    <li><a href="#62-how-it-picks-terrains">6.2 How it picks terrains</a></li>
     <li><a href="#63-evaluation-settings">6.3 Evaluation Settings</a></li>
     <li><a href="#64-what-the-csv-records">6.4 What the CSV Records</a></li>
     <li><a href="#65-files-and-reasoning">6.5 Files and Reasoning</a></li>
   </ul></details></li>
   <li><details><summary><a href="#7-skills-trained-on">7. Skills Trained On</a></summary><ul>
     <li><a href="#71-successfully-trained-on">7.1 Successfully trained on</a></li>
-    <li><a href="#72-what-we-want-to-train-on-next">7.2 What we want to train on next</a></li>
   </ul></details></li>
   <li><details><summary><a href="#8-b2w-config-verify-before-sim2real">8. B2W Config (Verify Before Sim2Real)</a></summary><ul>
     <li><a href="#81-source-of-truth---unitreepy">8.1 Source of Truth - unitree.py</a></li>
@@ -94,10 +91,7 @@ RL policy trained in `robot_lab` --> exported to ONNX via `play.py` --> C++ cont
   </ul></details></li>
   <li><details><summary><a href="#13-code-walkthrough-trainpy">13. Code Walkthrough: train.py</a></summary><ul>
     <li><a href="#131-ppo">13.1 PPO</a></li>
-    <li><a href="#132-distillation-mlp-student">13.2 Distillation (MLP Student)</a></li>
-    <li><a href="#133-distillation-lstm-student">13.3 Distillation (LSTM Student)</a></li>
-    <li><a href="#134-multi-expert-distillation-lstm-student">13.4 Multi-Expert Distillation (LSTM Student)</a></li>
-    <li><a href="#135-rl-fine-tuning-ppo-warm-started-lstm-actor">13.5 RL Fine-Tuning (PPO, warm-started LSTM actor)</a></li>
+    <li><a href="#132-multiexpert-distillation-cnn-rnn-student">13.2 MultiExpert Distillation (CNN-RNN Student)</a></li>
   </ul></details></li>
 </ul>
 
@@ -113,10 +107,20 @@ near-locomotion-quadruped/
 ├── robot_lab/                                         ← train, eval & export (Isaac Lab)
 │   ├── source/robot_lab/tasks/.../unitree_b2w/        ← task definitions (see note below)
 │   │   ├── rough_env_cfg.py, flat_env_cfg.py          ← v0 rough & flat tasks
+│   │   ├── rough_env_cfg_v1.py                        ← v1 rough terrain (current teacher)
 │   │   ├── staircaseup_teacher_env_cfg.py             ← stairs-climbing teacher terrain
 │   │   ├── slopeup_teacher_env_cfg.py                 ← slope-climbing teacher terrain
+│   │   ├── multiexpert_teacher_env_cfg.py             ← CURRENT: merged terrain + depth cameras
+│   │   ├── teachers.txt                               ← expert roster (task id + checkpoint)
 │   │   ├── agents/rsl_rl_ppo_cfg.py                   ← PPO runner cfgs (per-experiment log dirs)
+│   │   ├── agents/rsl_rl_distillation_cfg.py          ← legacy MLP & plain-LSTM student cfgs
+│   │   ├── agents/rsl_rl_multiexpert_distillation_cfg.py  ← CURRENT: CNN-LSTM student cfg
 │   │   └── __init__.py                                ← gym.register task ids
+│   ├── source/robot_lab/tasks/.../velocity/mdp/
+│   │   ├── observations.py                            ← joint_pos_rel_without_wheel, DepthImageDR
+│   │   └── distillation/
+│   │       ├── multiteacher.py                        ← MultiTeacherDistillation (expert routing)
+│   │       └── cnn_rnn_model.py                       ← CURRENT: CNNRNNModel student
 │   ├── scripts/reinforcement_learning/rsl_rl/
 │   │   ├── train.py, play.py                          ← train, watch, export ONNX
 │   │   └── play_cs.py                                 ← USD-map play
@@ -132,11 +136,12 @@ near-locomotion-quadruped/
 └── unitree_rl_lab/                                    ← deployment (C++ controller)
     └── deploy/
         ├── include/FSM/FSMState.h                     ← keyboard FSM transitions
-        ├── include/FSM/State_SitDown.h                ← two-phase sit-down state
+        ├── include/FSM/State_SitDown.h                ← three-phase sit-down state
         ├── include/.../observations/observations.h   ← joint_pos_rel_without_wheel
         └── robots/b2w/
             ├── config/config.yaml                     ← FSM keys, policy_dir, PD gains
-            ├── config/deploy.yaml                     ← observation & action layout
+            ├── config/deploy.yaml                     ← observation & action layout (57-el legacy)
+            ├── include/RecurrentOrtRunner.h           ← LSTM hidden-state ONNX runner
             ├── main.cpp                               ← keyboard init, DDS domain
             └── src/State_RLBase.cpp                   ← leg PD + wheel velocity hybrid
 ```
@@ -253,33 +258,6 @@ The dev container's `~/.bashrc` defines two functions. Call each once per termin
 | `setup_isaaclab` | Before `train.py`, `play.py` script (need Isaac Lab) | [See function definition](../../../isaac-sim/.bashrc#L134-L161) |
 | `sim2sim_env` | Before `unitree_mujoco` or `b2w_ctrl` | [See function definition](../../../isaac-sim/.bashrc#L165-L169) |
 
-<details>
-<summary>Steps to load flat terrain policy to rough terrain environment:</summary>  
-
-`--load_actor_only` flag (Not necessary for distillation - for rough & flat terrain)
-
-To load a flat-terrain checkpoint into the rough-terrain task, you **must** pass `--load_actor_only`:
-
-```bash
-setup_isaaclab
-cd /workspace/near-locomotion-quadruped/robot_lab
-python scripts/reinforcement_learning/rsl_rl/play.py \
-  --task=RobotLab-Isaac-Velocity-Rough-Unitree-B2W-v0 \
-  --checkpoint /workspace/near-locomotion-quadruped/robot_lab/logs/rsl_rl/unitree_b2w_flat/<timestamp>/model_<N>.pt \
-  --num_envs 1 --keyboard --real-time --load_actor_only
-```
-
-Without it, `runner.load` will crash. The reason is that the actor and critic have different input sizes between the two tasks:
-
-| Network | Input (flat task) | Input (rough task) |
-|---|---|---|
-| Actor | 57 (base obs only) | 57 (base obs only) |
-| Critic | 60 (base obs + 3 extras) | 247 (base obs + height scans + privileged state) |
-
-The rough critic receives privileged observations, such as height scans, contact forces, terrain geometry, that flat critic doesn't need --> So never saw. 
-`play.py` still looks for critic's input, so by passing in `--load_actor_only`, only actor with 57 base observations is used.
-</details>
-
 ---
 
 ## 3. MuJoCo Sim2Sim Validation Setup
@@ -290,13 +268,13 @@ This section explains how to set up Sim2Sim validation using MuJoCo.
 > - **Passive** - motors limp, robot sits on the ground. startup state.
 > - **FixStand** - holds a fixed standing pose.
 > - **Velocity** - the RL policy is active and driving the robot from velocity commands.
-> - **SitDown** - two-phase sit-down (damp, then interpolate) before returning to Passive.
+> - **SitDown** - three-phase sit-down (damp, interpolate, then ramp stiffness down) before returning to Passive.
 
 ### 3.1 Overview
 
 **Training policy location** (auto-selected by `parser_policy_dir`):
 ```
-robot_lab/logs/rsl_rl/unitree_b2w_multiexpert/<latest-timestamp>/exported/policy.onnx
+robot_lab/logs/rsl_rl/<experiment_name>/<latest-timestamp>/exported/policy.onnx
 ```
 
 > **Note**: Run `play.py` to convert from `.pt` to `.onnx` format. 
@@ -382,6 +360,7 @@ Binary: `unitree_rl_lab/deploy/robots/b2w/build/b2w_ctrl` - [→ Run it](#run-tw
 
 ```yaml
 robot: "b2w"
+robot_scene: "scene_terrain.xml"   # ← the checked-in default on this branch (NOT scene.xml)
 domain_id: 0
 interface: "lo"       # loopback for sim2sim
 use_joystick: 0       # 0 = no USB gamepad required (keyboard mode)
@@ -405,7 +384,7 @@ Confirm `unitree_mujoco/unitree_robots/b2w/` exists and contains `b2w.xml`.
 After training and play, `policy.onnx` will be at:
 
 ```
-/workspace/near-locomotion-quadruped/robot_lab/logs/rsl_rl/unitree_b2w_multiexpert/<timestamp>/exported/
+/workspace/near-locomotion-quadruped/robot_lab/logs/rsl_rl/<experiment_name>/<timestamp>/exported/
 ```
 
 Check that `policy_dir` in
@@ -456,10 +435,10 @@ After patching, `scene_terrain.xml` should reference `b2w`, not `go2`:
 
 In `unitree_mujoco/simulate/config.yaml`:
 ```yaml
-# Flat ground (default):
+# Flat ground:
 robot_scene: "scene.xml"
 
-# Terrain:
+# Terrain (the checked-in value on this branch):
 robot_scene: "scene_terrain.xml" 
 ```
 
@@ -610,7 +589,7 @@ joint_pos_rel_without_wheel:
 
 | Action | Why |
 |---|---|
-| New FSM state with two phases, then auto-transitions to Passive. **Phase 1** ([`settle_time`](../unitree_rl_lab/deploy/include/FSM/State_SitDown.h#L22-L23) s): `kp=0`, Passive `kd` - pure damping bleeds momentum from the RL gait. **Phase 2** (`duration` s): linearly interpolates leg joints from the settled pose to the FixStand sit target (`qs[1]`). Wheel joints (`kp=0`) damp to a stop and are skipped from interpolation. | The damping phase lets momentum die out first and interpolation guides the robot down slowly. |
+| New FSM state with **three** phases, then auto-transitions to Passive. **Phase 1** (`settle_time` s): `kp=0`, Passive `kd` - pure damping bleeds momentum from the RL gait before position control re-engages. **Phase 2** (`duration` s): linearly interpolates leg joints from the settled pose to the FixStand sit target (`qs[1]`); wheel joints are **position-held** at their settled angle with `wheel_kp`/`wheel_kd`. **Phase 3** (`hold_time` s): legs hold the sit target while leg `kp` ramps linearly to 0. | Damping first stops the side-fall caused by jumping straight from an active gait to position targets. Holding the wheels stops them rolling as the contact geometry shifts. Ramping `kp` down lets the body settle under control instead of flopping the instant Passive drops stiffness to 0. |
 
 <details>
 <summary><strong>Click to expand CPP snippet</strong></summary>
@@ -620,27 +599,45 @@ joint_pos_rel_without_wheel:
 for(int i = 0; i < (int)kd_passive_.size(); ++i)
     lowcmd->msg_.motor_cmd()[i].q() = lowstate->msg_.motor_state()[i].q();
 
+// At settle: legs get FixStand gains; wheels (kp==0 in FixStand) are position-HELD
+// at their settled angle so they don't roll/skid while the body lowers.
+if(kp_stand_[i] > 0) { motor.kp() = kp_stand_[i];  motor.kd() = kd_stand_[i]; }
+else                 { motor.kp() = wheel_kp_;     motor.kd() = wheel_kd_;
+                       motor.q()  = q0_[i];        motor.dq() = 0; }
+
 // Phase 2: interpolate leg joints toward sit pose.
-// Skip joints where kp==0 (wheels) - they just damp to a stop.
 float alpha = std::min((float)((t - t_interp_) / duration_), 1.0f);
-int   n     = (int)std::min(q0_.size(), sit_q_.size());
 for(int i = 0; i < n; ++i)
-{
     if(kp_stand_[i] > 0)
         lowcmd->msg_.motor_cmd()[i].q() = q0_[i] + alpha * (sit_q_[i] - q0_[i]);
-}
-if(alpha >= 1.0f) done_ = true;
+
+// Phase 3: hold the sit pose and ramp leg kp down to ~0 before Passive takes over.
+float beta = std::min((float)((t - t_hold_) / hold_time_), 1.0f);
+for(int i = 0; i < n; ++i)
+    if(kp_stand_[i] > 0)
+    {
+        auto & motor = lowcmd->msg_.motor_cmd()[i];
+        motor.q()  = sit_q_[i];
+        motor.kp() = kp_stand_[i] * (1.0f - beta);
+    }
+if(beta >= 1.0f) done_ = true;
 ```
 
 </details>
 
-`settle_time` and `duration` are configured in `config.yaml`'s `SitDown:` block:
+All five parameters are configured in `config.yaml`'s `SitDown:` block:
 
 ```yaml
 SitDown:
-  settle_time: 0.05   # seconds of pure-damping before interpolation starts
+  settle_time: 0.05  # seconds of pure-damping before interpolation starts
   duration:    2.5   # seconds for the leg-joint interpolation to the sit pose
+  hold_time:   0.5   # seconds to ramp leg kp from FixStand kp down to 0
+  wheel_kp:    30    # wheel position-hold stiffness during phases 2-3
+  wheel_kd:    4     # wheel position-hold damping during phases 2-3
 ```
+
+> `wheel_kp` / `wheel_kd` carry a `TODO(b2w)` in the config: they are conservative defaults and have
+> not been tuned on hardware. Too stiff may buzz the hubs.
 
 #### B2W-specific files
 
@@ -678,6 +675,9 @@ All joint arrays extended from 12 → 16 entries for the wheels. `keyboard_trans
 +  SitDown:
 +    settle_time: 0.05
 +    duration: 2.5
++    hold_time: 0.5
++    wheel_kp: 30
++    wheel_kd: 4
 ```
 
 </details>
@@ -772,13 +772,7 @@ joint_pos_rel_wo_wheel    ×16  (scale 1.0, wheel slots = 0)
 joint_vel_rel             ×16  (scale 0.05)
 last_action               ×16  (scale 1.0)
 ```
-
-> **Critical:** every observation term must have `history_length: 1` (not 0).
-> With `history_length: 0` the internal ring buffer discards every sample immediately →
-> the observation vector fed to ONNX is empty → ONNX reads past the buffer → segfault on the first policy step.
-> All six terms in `deploy.yaml` already have `history_length: 1` - do not change them to 0.
-
----
+NOTE: This is outdated as student now has depth maps as well. This is yet to be deployed.
 
 ## 4. Workflow
 
@@ -793,11 +787,16 @@ Open a terminal and set up the Isaac Lab Python environment first. Each terrain 
 setup_isaaclab
 cd /workspace/near-locomotion-quadruped/robot_lab
 python scripts/reinforcement_learning/rsl_rl/train.py \
-  --task=RobotLab-Isaac-Velocity-StaircaseUp-Teacher-Unitree-B2W-v0 \
+  --task=RobotLab-Isaac-Velocity-Rough-Unitree-B2W-v1 \
   --headless --max_iterations 5000   # without --max_iterations it runs for 20000 iterations
 ```
+This task loads [`rough_env_cfg_v1.py`](../robot_lab/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/unitree_b2w/rough_env_cfg_v1.py).
+
 For other experts replace the `task` flag with:  
+**StaircaseUp teacher**: `RobotLab-Isaac-Velocity-StaircaseUp-Teacher-Unitree-B2W-v0`  
 **Slope Up teacher**: `RobotLab-Isaac-Velocity-SlopeUp-Teacher-Unitree-B2W-v0`  
+
+> **The StaircaseUp and SlopeUp reward systems are outdated and need retuning.** Do not treat them as ready-to-train experts. Retune their rewards before using them for distillation.
 
 
 <details>
@@ -876,11 +875,10 @@ Checkpoints are saved per teacher experiment:
 
 Use `play.py` to load a checkpoint, watch the robot in the Isaac Sim GUI, and export the policy. This script is for normal visual playback, not the controlled evaluation matrix. Key flags:
 
-- `--task` - environment to load (same as training, unless you are intentionally testing actor-only transfer).
+- `--task` - environment to load (normally the same environment used for training).
 - `--load_run <timestamp>` - load a specific run; omit to auto-load the most recent.
 - `--num_envs 1` - spawn a single robot; omit for multiple parallel environments (no keyboard then).
 - `--keyboard` - steer interactively. Drives `base_velocity` from the keyboard (velocity tasks).
-- `--load_actor_only` - load only the actor and skip critic weights. Use this when the actor observation space matches but the critic observation space differs between tasks.
 
 #### Run play.py with keyboard control
 
@@ -888,15 +886,26 @@ Use `play.py` to load a checkpoint, watch the robot in the Isaac Sim GUI, and ex
 setup_isaaclab
 cd /workspace/near-locomotion-quadruped/robot_lab
 python scripts/reinforcement_learning/rsl_rl/play.py \
-  --task=RobotLab-Isaac-Velocity-Rough-Unitree-B2W-v0 \
-  --load_run 2026-05-24_05-47-04 \
+  --task=RobotLab-Isaac-Velocity-Rough-Unitree-B2W-v1 \
+  --load_run 2026-07-07_06-00-00_height_scan_enabled \
   --num_envs 1 \
   --keyboard
 ```
 
 > Remove `--load_run` to auto-load the most recent run, or omit `--num_envs 1` to spawn multiple parallel environments. Keyboard mode is meant for one robot so the commands are easy to inspect.
 
-#### Keyboard controls
+#### Test out-of-distribution (OOD) generalisation
+
+Run the v1-trained checkpoint on the `v0` terrain it never saw during training. This checks that the policy generalises past its training distribution rather than overfitting the v1 terrain.
+
+```bash
+setup_isaaclab
+cd /workspace/near-locomotion-quadruped/robot_lab
+python scripts/reinforcement_learning/rsl_rl/play.py \
+  --task RobotLab-Isaac-Velocity-Rough-Unitree-B2W-v0 \
+  --checkpoint /workspace/near-locomotion-quadruped/robot_lab/logs/rsl_rl/unitree_b2w_rough_v1/2026-07-07_06-00-00_height_scan_enabled/model_6500.pt \
+  --keyboard --real-time
+```
 
 <details>
 <summary><strong>Click to expand Keyboard controls table</strong></summary>
@@ -913,30 +922,36 @@ python scripts/reinforcement_learning/rsl_rl/play.py \
 
 </details>
 
-> **Verify each expert before distillation.** Do not start distillation until you have visually confirmed that every teacher actually performs its skill well - a weak teacher distils into a weak student. Check each expert in **both** environments:
-> - **Isaac Sim** - the `play.py` run above; watch the teacher climb/ascend its terrain cleanly under keyboard control.
-> - **MuJoCo sim2sim** - follow [Section 4.7 - Sim2Sim in MuJoCo](#47-step-3---sim2sim-in-mujoco) to confirm the same behaviour survives the sim2sim transfer.
->
-> If a teacher is timid, drifts, or falls, tweak its rewards and retrain before distilling. See [Section 5 - Curriculum Training with Different Terrain](#5-curriculum-training-with-different-terrain) (e.g. [5.5 Worked example: StaircaseUp teacher](#55-worked-example-staircaseup-teacher)) for exactly which rewards were tuned and why.
-
-
 ### 4.3 Step 1c - Distillation (Student-Teacher)
 
-Distillation produces a deployable student policy that uses only proprioceptive observations (no height scan, no linear velocity). Student learns to mimic it via MSE loss on its own on-policy rollouts.
+Distillation trains one **student** to copy one or more privileged PPO **teachers**, using MSE loss
+on the student's own on-policy rollouts.
+
+The current student on this branch is **not** proprioception-only. It sees **two depth images** plus
+proprioception (including base linear velocity) and a velocity command, encoded by per-camera
+convolutional networks into a two-layer LSTM. The full walkthrough is
+[Section 13.2](#132-multiexpert-distillation-cnn-rnn-student); this section is the command recipe.
 
 #### Phase 1 - Train the teachers (PPO)
 
-The teachers are the privileged PPO policies already trained in [Step 1](#41-step-1---train-teacher-in-isaac-lab) - the StaircaseUp expert and the SlopeUp expert in this case. Make sure each one has been visually verified (see the note at the end of [Section 4.2](#42-step-1b---watch-the-robot-walk-in-isaac-sim)) before distilling.
+The teachers are the privileged PPO policies trained in [Step 1](#41-step-1---train-teacher-in-isaac-lab).
+Make sure each one has been visually verified (see the note at the end of
+[Section 4.2](#42-step-1b---watch-the-robot-walk-in-isaac-sim)) before distilling - a weak teacher
+distils into a weak student.
 
-#### Phase 2 - Multi-Expert Distillation
+#### Phase 2 - List the active teachers in `teachers.txt`
 
-Multi-expert distillation distils **several** terrain experts (e.g. StaircaseUp + SlopeUp) into **one** student in a single run. All experts are listed in [`teachers.txt`](../robot_lab/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/unitree_b2w/teachers.txt); the combined environment is built from them and each robot is taught by the expert matching its terrain.
+Open [`teachers.txt`](../robot_lab/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/unitree_b2w/teachers.txt)
+and confirm it lists exactly the experts you want, each pointing at the correct checkpoint.
 
-> **Check `teachers.txt` first.** Before training, open [`teachers.txt`](../robot_lab/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/unitree_b2w/teachers.txt) and confirm it lists exactly the experts you want, each pointing at the correct (visually-verified) teacher checkpoint. The combined environment is built straight from this file - a wrong or stale entry silently distils the wrong teacher.
+> **Current roster: one active entry** (`RobotLab-Isaac-Velocity-Rough-Unitree-B2W-v1`). The
+> machinery supports N experts; this roster exercises one. Format and parser details are in
+> [Section 5.6](#56-multi-expert-terrain).
 
-The student here is an **LSTM** (recurrent), not an **MLP** (feed-forward).   
+#### Phase 3 - Train the depth student
 
 ```bash
+setup_isaaclab
 cd /workspace/near-locomotion-quadruped/robot_lab
 python scripts/reinforcement_learning/rsl_rl/train.py \
   --task=RobotLab-Isaac-Velocity-MultiExpert-Teacher-Unitree-B2W-v0 \
@@ -944,106 +959,83 @@ python scripts/reinforcement_learning/rsl_rl/train.py \
   --headless
 ```
 
-No `--load_run` is needed here. Teacher checkpoints come from `teachers.txt`.  
-Students land in `logs/rsl_rl/unitree_b2w_multiexpert/`. How `teachers.txt` is parsed and the code behind it is in [Section 5.6 - Multi-Expert Terrain](#56-multi-expert-terrain); scoring the student on each teacher's terrain is in [Section 4.6](#46-step-2a---evaluate-policies-per-level-evaluation-csv).
+> **What the `--agent` flag resolves to depends on the task.** On the MultiExpert task,
+> `rsl_rl_distillation_recurrent_cfg_entry_point` is registered to
+> [`UnitreeB2WMultiExpertDistillationRunnerCfg`](../robot_lab/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/unitree_b2w/agents/rsl_rl_multiexpert_distillation_cfg.py)
+> (the CNN-LSTM depth student). On the rough-v1 / staircaseup / slopeup tasks the **same flag name**
+> resolves to `UnitreeB2WRoughDistillationRunnerRecurrentCfg` (a plain one-layer LSTM on the `policy`
+> group). Same flag, different model. This is the root of the evaluation incompatibility in
+> [Section 4.6](#46-step-2a---evaluate-policies-per-level-evaluation-csv).
 
-<details>
-<summary><strong>Code Changes (LSTM student cfg)</strong></summary>
-**File:** `.../config/wheeled/unitree_b2w/agents/rsl_rl_distillation_cfg.py`
+**During training the learner's action advances the environment.** The teacher's actions are computed
+from the student's observations, and those actions become the labels the student learns to match, as
+in supervised learning. This is what makes it DAgger-style rather than behaviour cloning - see
+[Section 13.2.6](#1326-training-step-and-loss).
 
-**File:** `.../config/wheeled/unitree_b2w/agents/rsl_rl_distillation_cfg.py`
+#### Phase 4 - Visually verify the student in Isaac Sim
 
-- New file added: ` /workspace/near-locomotion-quadruped/robot_lab/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/unitree_b2w/agents/rsl_rl_distillation_cfg.py `
-- New RNN class added: `UnitreeB2WRoughDistillationRunnerRecurrentCfg`: student switched from `RslRlMLPModelCfg` to `RslRlRNNModelCfg` (`rnn_type="lstm"`, `rnn_hidden_dim=256`, `rnn_num_layers=1`). Teacher and `obs_groups` inherited unchanged.
-- Added an `algorithm` override on that class: `gradient_length=24` (was 15) and `max_grad_norm=1.0` (was unset).
-
-> This file was built ontop of Anymal_D student training code.
-> Under: `/workspace/near-locomotion-quadruped/robot_lab/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/quadruped/anymal_d/agents/rsl_rl_distillation_cfg.py`
-
-**File:** `.../config/wheeled/unitree_b2w/__init__.py`
-
-- Registered `rsl_rl_distillation_recurrent_cfg_entry_point` → `UnitreeB2WRoughDistillationRunnerRecurrentCfg` on the rough task.
-</details>
-
-
-#### Phase 3 - Visually verify the student in Isaac Sim
-
-Before exporting, watch the distilled student drive in the Isaac Sim GUI. Use the same task and recurrent agent as training, and steer it with the keyboard:
+The CNN+LSTM student exports as well. [`CNNRNNModel.as_jit` / `as_onnx`](../robot_lab/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/distillation/cnn_rnn_model.py#L151-L161)
+return stateful export wrappers (`_TorchCNNRNNModel` / `_OnnxCNNRNNModel`), so `play.py` no longer
+raises before rendering. Load a student checkpoint on the registered play task and watch it drive:
 
 ```bash
 setup_isaaclab
 cd /workspace/near-locomotion-quadruped/robot_lab
 python scripts/reinforcement_learning/rsl_rl/play.py \
-  --task=RobotLab-Isaac-Velocity-MultiExpert-Teacher-Unitree-B2W-v0 \
+  --task=RobotLab-Isaac-Velocity-MultiExpert-Play-Rough-Unitree-B2W-v0 \
   --agent=rsl_rl_distillation_recurrent_cfg_entry_point \
   --num_envs 1 \
   --keyboard
 ```
 
-Omit `--load_run` to auto-load the most recent `unitree_b2w_multiexpert` run. Drive it with the numpad keys from [Section 4.2](#42-step-1b---watch-the-robot-walk-in-isaac-sim) and confirm the single student handles every teacher's terrain cleanly.
+Running this also writes `policy.pt` (TorchScript) and `policy.onnx` into an `exported/` subfolder
+next to the loaded checkpoint.
 
-> **Run headless instead.** Add `--headless` (and drop `--num_envs 1 --keyboard`) to run without opening a window - useful on a remote box or when you only want to trigger the ONNX export:
-> ```bash
-> python scripts/reinforcement_learning/rsl_rl/play.py \
->   --task=RobotLab-Isaac-Velocity-MultiExpert-Teacher-Unitree-B2W-v0 \
->   --agent=rsl_rl_distillation_recurrent_cfg_entry_point \
->   --headless
-> ```
+### 4.4 Policy Generations and Support Matrix
 
+This repository contains **two** policy generations with **mutually incompatible observation
+contracts**. Read this table before running any export, evaluation, or deployment command.
 
-### 4.4 Step 1d - RL Fine-Tuning (Stage 3)
+| Generation | Observation contract | Where it comes from |
+|---|---|---|
+| **Current privileged teacher** | 247 elements (57 + 3 `base_lin_vel` + 187 `height_scan`) | Rough v0/v1, staircaseup, slopeup PPO teachers as configured today. |
+| **Current depth student** | Grouped: `student` (proprio, keeps `base_lin_vel`) + `student_commands` + `depth_front` + `depth_rear` (two 1×32×48 images) | The MultiExpert CNN-LSTM student. Not a flat vector at all. |
 
-Stage 3 takes the distilled multi-expert LSTM student from [Step 1c](#43-step-1c---distillation-student-teacher) and improves it with PPO on the same broad multi-expert terrain set. This follows the *Parkour in the Wild* recipe: warm-start the PPO actor from `student_state_dict`, keep the student's low action std, train a privileged critic from scratch, freeze the actor for an initial critic warmup, then unfreeze with conservative PPO settings.
+Support status per generation:
 
-Prerequisites: [`teachers.txt`](../robot_lab/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/unitree_b2w/teachers.txt) must still point at valid teacher checkpoints because the finetune env reuses the merged terrain builder, and a completed Stage-2 student must exist under `robot_lab/logs/rsl_rl/unitree_b2w_multiexpert/`. Override the student source with `STUDENT_CKPT=/path/to/model_or_run_dir` when needed.
+| Policy type | Normal Isaac play | JIT export | ONNX export | Existing C++ deployment |
+|---|---|---|---|---|
+| Current privileged 247-el teacher | Works | Supported by stock exporters | Supported by stock exporters | Not compatible - `deploy.yaml` is 57 elements and the robot has no height scanner |
+| Current two-camera CNN-LSTM student | Works | Supported (stateful export wrapper) | Supported (stateful export wrapper) | Not compatible - no depth capture or preprocessing in C++ |
 
-<details>
-<summary><strong>Train / play / evaluate the Stage-3 policy</strong></summary>
+> **The current `unitree_rl_lab` controller does not account for the new observations yet** - it has
+> no handling for the depth maps (`depth_front` / `depth_rear`) or `base_lin_vel`. Until the controller
+> is extended to capture, preprocess, and feed those inputs, neither generation deploys as-is.
 
-Full run:
-
-```bash
-setup_isaaclab
-cd /workspace/near-locomotion-quadruped/robot_lab
-STUDENT_CKPT=logs/rsl_rl/unitree_b2w_multiexpert \
-python scripts/reinforcement_learning/rsl_rl/train.py \
-  --task=RobotLab-Isaac-Velocity-MultiExpert-Finetune-Unitree-B2W-v0 \
-  --headless --max_iterations 3000
-```
-
-Play/export uses the normal PPO entry point; no distillation `--agent` flag is needed:
-
-```bash
-python scripts/reinforcement_learning/rsl_rl/play.py \
-  --task=RobotLab-Isaac-Velocity-MultiExpert-Finetune-Unitree-B2W-v0 \
-  --num_envs 1 --keyboard
-```
-
-Compare against the distilled student with the evaluation matrix:
-
-```bash
-python scripts/evaluation/evaluation.py \
-  --policies unitree_b2w_multiexpert_finetune unitree_b2w_multiexpert \
-  --headless
-```
-
-</details>
-
+> **Do not copy a depth-student checkpoint into the controller's `policy_dir`.** Renaming a file
+> cannot repair a tensor-shape, preprocessing, or recurrent-state contract mismatch. The controller
+> would need depth capture, the `DepthImageDR`-equivalent preprocessing, image tensor inputs, and
+> LSTM state carry-over before a depth checkpoint means anything to it.
 
 ### 4.5 Step 2 - Export to ONNX
 
-Running `play.py` auto-exports `policy.onnx` into an `exported/` subfolder next to the loaded checkpoint.
+Running `play.py` auto-exports `policy.pt` (TorchScript) and `policy.onnx` into an `exported/`
+subfolder next to the loaded checkpoint. The export happens at
+[play.py:218-224](../robot_lab/scripts/reinforcement_learning/rsl_rl/play.py#L218-L224),
+**unconditionally and before** the simulation loop at line 250.
+
+> **For the depth student, use the MultiExpert play command in [Phase 4](#phase-4---visually-verify-the-student-in-isaac-sim)** - it loads a separate play config so the student's grouped depth observations resolve correctly.
+
+This command works for a **PPO teacher** (feed-forward MLP actor):
 
 ```bash
 setup_isaaclab
 cd /workspace/near-locomotion-quadruped/robot_lab
 python scripts/reinforcement_learning/rsl_rl/play.py \
-  --task=RobotLab-Isaac-Velocity-MultiExpert-Teacher-Unitree-B2W-v0 \
-  --agent=rsl_rl_distillation_recurrent_cfg_entry_point \
+  --task=RobotLab-Isaac-Velocity-StaircaseUp-Teacher-Unitree-B2W-v0 \
   --headless
 ```
-> Can **Ctrl+C** if it runs successfully without crashing.
-> The `--agent` flag loads the recurrent (LSTM) distillation student; without it, `play.py` would try to load the multiexpert checkpoint as a plain PPO actor.
+> Can **Ctrl+C** once it runs without crashing - the export has already happened by then.
 
 <details>
 <summary><strong>Export from a specific run</strong></summary>
@@ -1051,8 +1043,7 @@ python scripts/reinforcement_learning/rsl_rl/play.py \
 ```bash
 setup_isaaclab
 python scripts/reinforcement_learning/rsl_rl/play.py \
-  --task=RobotLab-Isaac-Velocity-MultiExpert-Teacher-Unitree-B2W-v0 \
-  --agent=rsl_rl_distillation_recurrent_cfg_entry_point \
+  --task=RobotLab-Isaac-Velocity-StaircaseUp-Teacher-Unitree-B2W-v0 \
   --headless \
   --load_run 2026-05-24_05-47-04
 ```
@@ -1060,12 +1051,19 @@ python scripts/reinforcement_learning/rsl_rl/play.py \
 
 The exported policy will be at:
 ```
-/workspace/near-locomotion-quadruped/robot_lab/logs/rsl_rl/unitree_b2w_multiexpert/<timestamp>/exported/policy.onnx
+/workspace/near-locomotion-quadruped/robot_lab/logs/rsl_rl/<experiment_name>/<timestamp>/exported/policy.onnx
 ```
+
+> **An export is not a deployment.** A 247-element teacher exports cleanly to ONNX and still cannot
+> run against `deploy.yaml`, which describes a 57-element blind vector. Check
+> [Section 4.4](#44-policy-generations-and-support-matrix) before wiring an exported file into the
+> controller.
 
 ### 4.6 Step 2a - Evaluate Policies (Per-Level Evaluation CSV)
 
-Once you have more than one trained policy, use the orchestrator in `scripts/evaluation/evaluation.py`. Give it policy experiment names, run folders, or checkpoint paths, and it resolves the newest checkpoint from `logs/rsl_rl/`.
+An evaluation orchestrator exists at [`scripts/evaluation/evaluation.py`](../robot_lab/scripts/evaluation/evaluation.py) (and its worker `eval_worker.py`). **It is outdated for the current depth-student workflow** and is not maintained against the CNN-LSTM student or the depth-camera / elevation-map envs. Do not rely on it for the depth student; treat that path as a starting point that needs reworking before use.
+
+It still works for comparing **expert (PPO teacher) policies**. Give it experiment names, run folders, or `.pt` paths; it resolves the newest checkpoint under `logs/rsl_rl/`, runs each policy on the terrain(s) inferred from its name, and writes one row per terrain level plus a collapsed `<out_csv>_summary.csv`:
 
 ```bash
 setup_isaaclab
@@ -1075,29 +1073,24 @@ python scripts/evaluation/evaluation.py \
   --headless
 ```
 
-The orchestrator calls `eval_worker.py` for each compatible policy/terrain pair and writes one row per terrain level, plus a collapsed `<out_csv>_summary.csv` matrix with one summative success rate per terrain. See [Section 6](#6-evaluation-matrix) for the full command, dynamic policy lookup, success metric, and CSV columns. By default the evaluation is done at 0.9*maximum training diffculty.
+Supported flags:
 
-For normal use, call `scripts/evaluation/evaluation.py` instead of `eval_worker.py` directly. The orchestrator fills in the task ids, policy labels, terrain labels, level count, robot count, duration, and output CSV for you.
+| Flag | Default | Meaning |
+|---|---|---|
+| `--policies` | required | One or more policy run dirs, experiment dirs, experiment names, or `.pt` files. |
+| `--terrain` | inferred | Explicit terrain(s) to run every policy on. If omitted, each policy's terrain is inferred from its experiment name. Keys: `flat`, `rough`, `rough_v1`, `slopeup`, `slopeup_teacher`, `staircaseup`, `staircaseup_teacher`, `multiexpert`. |
+| `--out_csv` | `evaluation.csv` | Output CSV path (the summary lands at `<out_csv>_summary.csv`). |
+| `--levels` | `9` | Number of difficulty levels tested per terrain. |
+| `--robots_per_level` | `512` | Robots spawned on each difficulty level. |
+| `--duration_s` | auto | Seconds per rollout. Omitted, it is chosen from the terrain and robot count. |
+| `--headless` | off | Run the Isaac workers without a GUI. |
 
-#### Evaluate a multi-expert student on the teachers' terrains
-
-To score a multi-expert student (from [Section 4.3](#43-step-1c---distillation-student-teacher)) on each terrain it was distilled from, pass the student to `--policies` and the teacher terrains to `--terrain`:
-
-```bash
-setup_isaaclab
-cd /workspace/near-locomotion-quadruped/robot_lab
-python scripts/evaluation/evaluation.py \
-  --policies unitree_b2w_multiexpert \
-  --terrain staircaseup_teacher slopeup_teacher \
-  --headless
-```
-
-`--terrain` forces every policy to be run on every listed terrain (otherwise terrains are inferred from the policy name). Valid `--terrain` keys are the [`KNOWN_TERRAINS`](../robot_lab/scripts/evaluation/evaluation.py) keys, e.g. `flat`, `rough`, `staircaseup_teacher`, `slopeup_teacher`.
-
-> The `unitree_b2w_multiexpert` checkpoint is a **distillation** checkpoint (it stores `student_state_dict`, not `actor_state_dict`). [`evaluation.py`](../robot_lab/scripts/evaluation/evaluation.py) maps that experiment to the distillation agent entry point automatically, so the deployable LSTM student is loaded and scored - no extra flags needed.
+By default the sweep runs at 0.9 x the policy's max training difficulty. See [Section 6](#6-evaluation-matrix) for the success metric and CSV columns.
 
 
 ### 4.7 Step 3 - Sim2Sim in MuJoCo
+
+> To be updated to accomodate for the depth student.
 
 > **Verify config first.** Before this sim2sim run, confirm the B2W physical parameters, gains, scales, and observation layout match across all configs - see [§8. B2W Config (Verify Before Sim2Real)](#8-b2w-config-verify-before-sim2real). A mismatch here is the most common cause of a policy that walks in Isaac Sim but falls in MuJoCo.
 
@@ -1178,15 +1171,17 @@ Check how to set it up under [B2W MuJoCo Sim2Sim Validation → Terrain Generati
 
 ### 4.9 Step 4 - Sim2Real (to be tested)
 
-> **Verify config first.** Before running on the real robot, walk the full checklist in [§8. B2W Config (Verify Before Sim2Real)](#8-b2w-config-verify-before-sim2real) and confirm every value matches the [official `unitree_ros` B2W URDF](https://github.com/unitreerobotics/unitree_ros/tree/master/robots/b2w_description).
+> **The current depth student cannot be deployed.** The C++ controller has no depth capture, no depth
+> preprocessing, and no image tensor inputs. This section describes the deployment path for the
+> **legacy blind 57-element** policy generation only. Read
+> [Section 4.4](#44-policy-generations-and-support-matrix) first.
 
-Following are the steps to deploy the multiexpert student policy
-(`robot_lab/logs/rsl_rl/unitree_b2w_multiexpert`) onto the real robot
+> **Verify config first.** Before running on the real robot, walk the full checklist in [§8. B2W Config (Verify Before Sim2Real)](#8-b2w-config-verify-before-sim2real) and confirm every value matches the [official `unitree_ros` B2W URDF](https://github.com/unitreerobotics/unitree_ros/tree/master/robots/b2w_description).
 
 The controller binary, `deploy.yaml`, and FSM are **identical to sim2sim** - the same `b2w_ctrl`
 you already ran against MuJoCo. Only two things change for hardware:
 
-1. `policy_dir` in `config.yaml` points at the multiexpert student log root.
+1. `policy_dir` in `config.yaml` points at the log root of the policy you are deploying.
 2. `b2w_ctrl` runs on the robot's real network interface instead of `lo`.
 
 
@@ -1198,21 +1193,28 @@ The E-Stop Button is **X** on the laptop, after deploying the policy.
   controller, `unitree_sdk2`, and the ONNX Runtime symlink are all set up).
 - The physical B2W is powered on and sitting on the ground. It does not need to be put in any
   special low-level mode - the controller claims the motor channel on startup, and `f` stands it up.
+- **A checkpoint whose actor matches the 57-element `deploy.yaml` contract.** Confirm this before
+  going near the hardware.
 
-#### 1. Export the multiexpert student policy to ONNX
+#### 1. Export the policy to ONNX
 
 To deploy onto the robot, need `.onnx` format file.
 See [Step 2 - Export to ONNX](#45-step-2---export-to-onnx) for details.
 
-#### 2. Confirm the controller points at the multiexpert student logs
+#### 2. Point the controller at that policy's logs
 
 In [`unitree_rl_lab/deploy/robots/b2w/config/config.yaml`](../unitree_rl_lab/deploy/robots/b2w/config/config.yaml),
-`policy_dir` under the `Velocity` state should be the multiexpert student log root:
+`policy_dir` under the `Velocity` state is the log root to deploy from. The checked-in value is:
 
 ```yaml
   Velocity:
     policy_dir: ../../../../robot_lab/logs/rsl_rl/unitree_b2w_multiexpert
 ```
+
+> **This checked-in value is stale and points at an undeployable generation.** The
+> `unitree_b2w_multiexpert` log root holds CNN-LSTM depth checkpoints with no `exported/` folder,
+> because they cannot be exported. Repoint `policy_dir` at a blind-generation log root before
+> deploying.
 
 `parser_policy_dir()` goes down the folder and auto-selects the newest timestamp dir containing an
 `exported/` folder.
@@ -1285,7 +1287,7 @@ the ethernet tether is only needed up front to build and launch.
 
 1. Over the tether, SSH into the Jetson (`192.168.123.164`) and build there. The x86_64 workstation
    binary will not run on the Jetson's ARM64, so rebuild `unitree_sdk2` and `b2w_ctrl` on the
-   Jetson, and copy the `unitree_b2w_multiexpert` log dir across so `policy_dir` resolves locally.
+   Jetson, and copy the deployed policy's log dir across so `policy_dir` resolves locally.
 2. Launch on the Jetson with `--network <jetson NIC on 192.168.123.0/24>`. Once it is running the
    tether can be unplugged - the controller lives entirely on the robot.
 3. Drive with the wireless remote instead of the keyboard: switch the velocity observation from
@@ -1299,7 +1301,7 @@ the ethernet tether is only needed up front to build and launch.
 
 Every B2W terrain policy uses **velocity tracking** (the robot is told a forward/sideways/turning speed and rewarded for matching it). What you vary between policies is the **terrain** - the obstacles the robot trains on (stairs, slopes, boxes, rough ground, ...), see [5.4](#54-plug-in-a-different-terrain).
 
-The default `v0` task is **mixed rough terrain + velocity tracking**. To build a new variant you swap the terrain ([5.4](#54-plug-in-a-different-terrain)). Section [5.5](#55-worked-example-staircaseup-teacher) shows the same recipe filled in for the StaircaseUp teacher.
+The default `v0` task is **mixed rough terrain + velocity tracking**. To build a new variant you swap the terrain ([5.4](#54-plug-in-a-different-terrain)). Section [5.5](#55-worked-example-rough-v1-walking-policy-expert) shows the same recipe filled in for the rough-v1 walking policy expert.
 
 All training runs in Isaac-Sim with 4096 parallel environments. Sections [5.2](#52-sub-terrains-the-default-mix) and [5.3](#53-terrain-difficulty-curriculum) explain how the default terrain and its difficulty curriculum work - read them once as background before building your own variant.
 
@@ -1562,9 +1564,11 @@ Train it with `--task=RobotLab-Isaac-Velocity-<Task>-Unitree-B2W`. All existing 
 
 ---
 
-### 5.5 Worked example: StaircaseUp teacher
+### 5.5 Worked example: rough-v1 walking policy expert
 
-This example follows the same four steps from [Section 5.4](#54-plug-in-a-different-terrain), but fills them in for a velocity-based StaircaseUp teacher.
+This example follows the same four steps from [Section 5.4](#54-plug-in-a-different-terrain), but fills them in for **rough-v1**, the general walking-policy expert (**the current teacher**). Unlike the single-terrain StaircaseUp/SlopeUp experts, rough-v1 mixes several terrain types into one environment so a **single** PPO policy learns to walk over stairs, slopes, and scattered obstacles.
+
+The defining property: rough-v1 is a **pure terrain swap**. Rewards, observations, and actions are inherited unchanged from the base rough task ([`rough_env_cfg.py`](../robot_lab/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/unitree_b2w/rough_env_cfg.py)). The only real change is the terrain generator, so there is no reward retuning to reason about.
 
 The task stays inside the velocity folder:
 
@@ -1575,62 +1579,48 @@ robot_lab/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/con
 The registered task is:
 
 ```text
-RobotLab-Isaac-Velocity-StaircaseUp-Teacher-Unitree-B2W-v0
+RobotLab-Isaac-Velocity-Rough-Unitree-B2W-v1
 ```
 
-This is a **velocity tracking** task: the robot is asked to follow forward/sideways/turning speed commands.
+This is a **velocity tracking** task: the robot is asked to follow forward/sideways/turning speed commands, and the mixed terrain forces it to hold that tracking while climbing and stepping over obstacles.
 
 #### Step 1 - Choose the terrain composition
 
 The terrain is defined in:
 
 ```text
-staircaseup_teacher_env_cfg.py
+rough_env_cfg_v1.py
 ```
 
-The config creates a new `STAIRCASEUP_TEACHER_CFG` instead of editing the shared rough terrain. It uses only upward staircase terrain:
+The config creates a new `ROUGH_TERRAINS_V1_CFG` instead of editing the shared base terrain (`ROUGH_TERRAINS_CFG` is left untouched, since `v0` shares it). Tiles are 8 m x 8 m, 10 difficulty rows x 20 columns, and mix three terrain families:
 
-| Terrain piece | Share | What it gives the robot |
-|---|---:|---|
-| `MeshInvertedPyramidStairsTerrainCfg` | 50% | sharp, solid stair edges |
-| `HfInvertedPyramidStairsTerrainCfg` | 50% | smoother heightfield stairs |
+| Terrain piece | Share | Params | What it gives the robot |
+|---|---:|---|---|
+| `MeshInvertedPyramidStairsTerrainCfg` | 30% | step height 5 cm, tread 27.5 cm | sharp, solid stair edges |
+| `HfInvertedPyramidStairsTerrainCfg` | 30% | step height 5 cm, tread 27.5 cm | smoother heightfield stairs |
+| `HfInvertedPyramidSlopedTerrainCfg` | 20% | slope 0.176 rad (~10°) | a continuous outward incline |
+| `HfDiscreteObstaclesTerrainCfg` | 20% | 8 boxes, height 5-15 cm, width 0.4-1.0 m | scattered low obstacles to step over |
 
-Both use step heights from **6 cm to 20 cm** with a fixed 27.5 cm tread, centred on the real hanger staircase (16.8 cm rise, 27.8 cm step width). Every tile here is an ascending staircase.
+So the mix is **60% stairs, 20% slopes, 20% obstacles**. Training on all three at once is what makes this a general walking expert rather than a specialist.
 
 #### Step 2 - Add the env config
 
-`UnitreeB2WStaircaseUpTeacherEnvCfg` subclasses the normal B2W rough velocity config:
+`UnitreeB2WRoughEnvCfgV1` subclasses the normal B2W rough velocity config:
 
 ```python
-class UnitreeB2WStaircaseUpTeacherEnvCfg(UnitreeB2WRoughEnvCfg):
+class UnitreeB2WRoughEnvCfgV1(UnitreeB2WRoughEnvCfg):
 ```
 
-Inside `__post_init__`, it makes the staircase task different from the default rough task:
+Inside `__post_init__`, it makes only the changes needed to run the new terrain:
 
 | Change | Why |
 |---|---|
-| `self.scene.terrain.terrain_generator = STAIRCASEUP_TEACHER_CFG` | use the staircase-only terrain |
-| `self.sim.physx.gpu_collision_stack_size = 2**27` | give PhysX more room for many stair contacts |
-| `curriculum = True` on the new terrain generator | keep the row-by-row difficulty curriculum from 5.3 |
-| `self.scene.terrain.max_init_terrain_level = 0` | start on the easiest stair row |
+| `self.scene.terrain.terrain_generator = ROUGH_TERRAINS_V1_CFG` | use the mixed v1 terrain |
+| `self.sim.physx.gpu_collision_stack_size = 2**27` | stair meshes + obstacles spawn many contacts; raise the GPU collision stack from 64 MB to 128 MB |
+| `curriculum = True` on the new terrain generator (if `terrain_levels` is active) | keep the row-by-row difficulty curriculum from 5.3 |
+| re-run `disable_zero_weight_rewards()` for this subclass | the parent only does that automatically for its own base class name |
 
-Then it keeps velocity tracking but tunes the rewards for climbing:
-
-| Reward change | Plain meaning |
-|---|---|
-| `track_lin_vel_xy_exp: 3.0 -> 5.0` | reward forward/sideways speed tracking more |
-| `track_ang_vel_z_exp: 1.5 -> 2.5` | reward turning speed tracking more |
-| `action_rate_l2: -0.01 -> -0.0025` | allow quicker leg motions |
-| `joint_pos_penalty: -1.0 -> -0.25` | allow bigger leg bends on stairs |
-| `lin_vel_z_l2: -2.0 -> -0.5` | allow the body to rise when climbing |
-| `feet_height_body: 0 -> -2.0` | encourage higher foot/wheel clearance |
-
-**Raising the rewards** (`track_lin_vel_xy_exp` 3.0 → 5.0, `track_ang_vel_z_exp` 1.5 → 2.5) so moving beats standing still.  
-**Relaxing the penalties** that fight climbing (`action_rate_l2`, `joint_pos_penalty`, `lin_vel_z_l2`) so the robot can take quicker, bigger leg motions and let its body rise onto a step.  
-Turning on `feet_height_body` (0 → -2.0) lifts the feet/wheels higher to clear taller steps.  
-Everything else (episode length, curriculum promotion, `upward`) is inherited unchanged from the rough task.
-
-Finally, it reruns `disable_zero_weight_rewards()` for this subclass, because the parent only does that automatically for its own base class name.
+**No reward, observation, or action changes.** This is the contrast with the StaircaseUp specialist, which retuned six reward terms to coax cautious climbing. rough-v1 keeps the base rough reward set verbatim and lets the mixed terrain do the shaping.
 
 #### Step 3 - Add a PPO runner config
 
@@ -1643,13 +1633,13 @@ agents/rsl_rl_ppo_cfg.py
 It subclasses the normal B2W rough PPO settings and only changes the experiment name:
 
 ```python
-class UnitreeB2WStaircaseUpTeacherPPORunnerCfg(UnitreeB2WRoughPPORunnerCfg):
+class UnitreeB2WRoughV1PPORunnerCfg(UnitreeB2WRoughPPORunnerCfg):
     def __post_init__(self):
         super().__post_init__()
-        self.experiment_name = "unitree_b2w_staircaseup_teacher"
+        self.experiment_name = "unitree_b2w_rough_v1"
 ```
 
-This keeps the training algorithm the same while saving logs and checkpoints under a separate run folder.
+This keeps the training algorithm the same while saving logs and checkpoints under a separate run folder (`logs/rsl_rl/unitree_b2w_rough_v1/`).
 
 #### Step 4 - Register the gym task id
 
@@ -1659,38 +1649,83 @@ The task is registered in:
 __init__.py
 ```
 
-The registration connects the task name to the two new config classes:
+The registration connects the task name to the config classes (PPO for training plus the distillation entry points, since rough-v1 is also used as a teacher):
 
 ```python
 gym.register(
-    id="RobotLab-Isaac-Velocity-StaircaseUp-Teacher-Unitree-B2W-v0",
+    id="RobotLab-Isaac-Velocity-Rough-Unitree-B2W-v1",
     entry_point="isaaclab.envs:ManagerBasedRLEnv",
     disable_env_checker=True,
     kwargs={
-        "env_cfg_entry_point": f"{__name__}.staircaseup_teacher_env_cfg:UnitreeB2WStaircaseUpTeacherEnvCfg",
-        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:UnitreeB2WStaircaseUpTeacherPPORunnerCfg",
+        "env_cfg_entry_point": f"{__name__}.rough_env_cfg_v1:UnitreeB2WRoughEnvCfgV1",
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:UnitreeB2WRoughV1PPORunnerCfg",
     },
 )
 ```
 
-Train it with:
+Train the walking expert with:
 
 ```bash
 cd /workspace/near-locomotion-quadruped/robot_lab
 python scripts/reinforcement_learning/rsl_rl/train.py \
-  --task=RobotLab-Isaac-Velocity-StaircaseUp-Teacher-Unitree-B2W-v0
+  --task=RobotLab-Isaac-Velocity-Rough-Unitree-B2W-v1
 ```
 
-In short: this teacher does not introduce a new reward style. It uses the same velocity tracking idea as the rough task, but trains on staircase-only terrain and relaxes the penalties that would otherwise make climbing too cautious.
+In short: rough-v1 introduces no new reward style. It reuses the base rough velocity-tracking task verbatim and swaps in one mixed terrain (stairs + slopes + obstacles), so a single PPO run yields a general walking expert. That expert is then verified ([4.2](#42-step-1b---watch-the-robot-walk-in-isaac-sim)) and used as a teacher for distillation ([4.3](#43-step-1c---distillation-student-teacher)).
 
 
 ### 5.6 Multi-Expert Terrain
 
-The teachers in 5.5 each cover **one** terrain. A multi-expert run merges several of those experts into **one** combined environment and distils them into **one** deployable LSTM student. Each robot trains on the terrain it spawns on and is copied (behavior-cloned) by the matching expert - the per-env routing from *Parkour in the Wild*. The result: no forgetting, a single run, and one student that handles every terrain at once.
+The teachers in 5.5 each cover **one** terrain. A multi-expert run merges several of those experts into **one** combined environment and distils them into **one** student. Each robot trains on the terrain it spawns on and is copied (behavior-cloned) by the matching expert - the per-env routing from *Parkour in the Wild*. The intent: no forgetting, a single run, and one student that handles every terrain at once.
+
+> **The multi-expert run changes more than the algorithm.** It also swaps the environment
+> observation groups (adding two depth cameras and splitting the student's proprioception and
+> commands apart) and selects a custom CNN-LSTM student model. See
+> [Section 13.2](#132-multiexpert-distillation-cnn-rnn-student).
+
+#### Registered task status
+
+| Task id | Status |
+|---|---|
+| `RobotLab-Isaac-Velocity-Flat-Unitree-B2W-v0` | Registered, config present |
+| `RobotLab-Isaac-Velocity-Rough-Unitree-B2W-v0` | Registered, config present |
+| `RobotLab-Isaac-Velocity-Rough-Unitree-B2W-v1` | Registered, config present. **The current teacher.** |
+| `RobotLab-Isaac-Velocity-StaircaseUp-Teacher-Unitree-B2W-v0` | Registered, config present |
+| `RobotLab-Isaac-Velocity-SlopeUp-Teacher-Unitree-B2W-v0` | Registered, config present |
+| `RobotLab-Isaac-Velocity-MultiExpert-Teacher-Unitree-B2W-v0` | Registered. Only registers the **distillation-recurrent** entry point (no plain PPO entry point). |
+| `RobotLab-Isaac-Velocity-MultiExpert-Play-Rough-Unitree-B2W-v0` | Registered play variant for the CNN-LSTM student on the stock v0 rough terrain. Normal `play.py` remains blocked by the model's unimplemented export methods. |
+
+> Always include the version suffix (`-v0`, `-v1`) in a task id. The registration ids carry it and
+> the lookup is exact.
 
 #### `teachers.txt` drives the whole thing
 
-The experts are listed in [`teachers.txt`](../robot_lab/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/unitree_b2w/teachers.txt), one per line. The **line index is the expert id**:
+The experts are listed in [`teachers.txt`](../robot_lab/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/unitree_b2w/teachers.txt), one per line. The **line index is the expert id**.
+
+**The parser reads exactly two whitespace-separated fields per line** - see
+[`parse_teachers_txt`](../robot_lab/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/unitree_b2w/multiexpert_teacher_env_cfg.py#L112-L124).
+Everything after `#` is stripped as a comment; blank lines are skipped.
+
+- `task_id` - the per-teacher task (from 5.4 / 5.5). Its terrain is pulled in and merged into the combined env, and its PPO actor is loaded as that expert's teacher.
+- `expert_PPO_checkpoint` - that expert's trained PPO checkpoint. May be a `.pt` file, a run dir, or an experiment dir; `resolve_checkpoint` picks the highest-iteration `model_<N>.pt` in the newest run.
+
+> **There is no weight column.** The parser reads `parts[0]` and `parts[1]` and ignores anything
+> further, so a third field is silently discarded. Expert routing comes from **terrain columns**, not
+> from a weight: each teacher contributes its own sub-terrains, whose proportions already sum to 1,
+> and `build_multiexpert_terrain` normalizes the merged proportions so every expert receives an
+> equal share of columns.
+
+**The active roster on this branch is one line:**
+
+```
+RobotLab-Isaac-Velocity-Rough-Unitree-B2W-v1  /workspace/near-locomotion-quadruped/robot_lab/logs/rsl_rl/unitree_b2w_rough_v1/2026-07-07_06-00-00_height_scan_enabled
+```
+
+The machinery supports N experts; this roster exercises one. A run against it is a multi-expert
+*mechanism* driving a single expert, not a multi-expert *result*.
+
+<details>
+<summary><strong>Example only - a multi-row roster (not the checked-in state)</strong></summary>
 
 ```
 # task_id                                                    expert_PPO_checkpoint
@@ -1698,48 +1733,36 @@ RobotLab-Isaac-Velocity-StaircaseUp-Teacher-Unitree-B2W-v0  /abs/.../unitree_b2w
 RobotLab-Isaac-Velocity-SlopeUp-Teacher-Unitree-B2W-v0      /abs/.../unitree_b2w_slopeup_teacher/
 ```
 
-- `task_id` - the per-teacher task (from 5.4 / 5.5). Its terrain is pulled in and merged into the combined env.
-- `expert_PPO_checkpoint` - that expert's trained PPO checkpoint, loaded as its teacher (newest `model_*.pt` is auto-picked from a run folder).
-- optional third column - a per-expert `weight` (default `1.0`) that sets its share of terrain columns.
+</details>
 
 At startup the combined env reads the file, merges every expert's sub-terrains into one curriculum terrain, and computes a **column → expert** map (using the terrain generator's deterministic column formula) so each robot is supervised by the expert for the terrain it stands on. **Add an expert = add a line** - the terrain and routing reshape automatically.
 
-Train it as shown in [Section 4.3](#43-step-1c---distillation-student-teacher); students land in `logs/rsl_rl/unitree_b2w_multiexpert/`. Score the student per terrain in [Section 4.6](#46-step-2a---evaluate-policies-per-level-evaluation-csv).
+Train it as shown in [Section 4.3](#43-step-1c---distillation-student-teacher); students land in `logs/rsl_rl/unitree_b2w_multiexpert/`. Per-terrain scoring of the depth student is **not currently possible** - see [Section 4.6](#46-step-2a---evaluate-policies-per-level-evaluation-csv).
 
 <details>
 <summary><strong>Multi-expert training - code changes</strong></summary>
 
-Four new files, **no `train.py` edit**. The combined env auto-shapes from `teachers.txt`.
+Five load-bearing files, **no `train.py` edit**. The combined env auto-shapes from `teachers.txt`.
 
-1. [`multiexpert_teacher_env_cfg.py`](../robot_lab/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/unitree_b2w/multiexpert_teacher_env_cfg.py) - reads `teachers.txt`, merges each listed task's sub-terrains into one curriculum terrain, precomputes the column → expert map, and stores the checkpoint paths + map on the cfg for the algorithm to read.
+1. [`multiexpert_teacher_env_cfg.py`](../robot_lab/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/unitree_b2w/multiexpert_teacher_env_cfg.py) - reads `teachers.txt`, merges each listed task's sub-terrains into one curriculum terrain, precomputes the column → expert map, stores the checkpoint paths + map on the cfg, **and adds the two depth cameras plus the student's `student` / `student_commands` / `depth_front` / `depth_rear` observation groups**.
 2. [`mdp/distillation/multiteacher.py`](../robot_lab/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/distillation/multiteacher.py) (+ [`__init__.py`](../robot_lab/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/distillation/__init__.py)) - `MultiTeacherDistillation`, a subclass of RSL-RL `Distillation`. It loads N frozen teachers, routes supervision per env in `act()`, and saves `student_state_dict` plus a per-expert `teacher_<i>_state_dict`.
-3. [`agents/rsl_rl_multiexpert_distillation_cfg.py`](../robot_lab/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/unitree_b2w/agents/rsl_rl_multiexpert_distillation_cfg.py) - reuses the recurrent (LSTM) runner cfg from [Section 4.3](#43-step-1c---distillation-student-teacher) and only swaps the algorithm `class_name` to `MultiTeacherDistillation`; `experiment_name = unitree_b2w_multiexpert`.
-4. [`__init__.py`](../robot_lab/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/unitree_b2w/__init__.py) - registers `RobotLab-Isaac-Velocity-MultiExpert-Teacher-Unitree-B2W-v0`.
+3. [`mdp/distillation/cnn_rnn_model.py`](../robot_lab/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/distillation/cnn_rnn_model.py) - `CNNRNNModel`, the per-camera CNN encoders + two-layer LSTM student with the command-bypass head.
+4. [`agents/rsl_rl_multiexpert_distillation_cfg.py`](../robot_lab/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/unitree_b2w/agents/rsl_rl_multiexpert_distillation_cfg.py) - swaps the algorithm `class_name` to `MultiTeacherDistillation`, **swaps the student to `CNNRNNModel`, and redefines `obs_groups`**; `experiment_name = unitree_b2w_multiexpert`.
+5. [`__init__.py`](../robot_lab/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/unitree_b2w/__init__.py) - registers `RobotLab-Isaac-Velocity-MultiExpert-Teacher-Unitree-B2W-v0`.
+
+> **It is not true that "only the algorithm changes."** The environment observation groups and the
+> student model change too. The multi-expert run is a different student on a different observation
+> contract, not the [Section 4.3](#43-step-1c---distillation-student-teacher) plain-LSTM student with
+> a new loss router.
 
 > No `train.py` edit is needed: the stock single-checkpoint load only fires when `algorithm.class_name == "Distillation"`. Here it is the dotted `MultiTeacherDistillation` path, so that branch is skipped and `--load_run` is not required.
 
 </details>
 
-<details>
-<summary><strong>Sim2sim of the recurrent student - code changes</strong></summary>
-
-The distilled student is an **LSTM**, so it is stateful. `play.py` exports an ONNX graph with hidden-state I/O (`h_in`/`c_in` in, `h_out`/`c_out` out), not just `obs → actions`. The stock C++ runner ([`OrtRunner`](../unitree_rl_lab/deploy/include/isaaclab/algorithms/algorithms.h)) expects a stateless MLP and aborts on activation:
-
-```
-what(): Input name h_in not found in observations.
-```
-
-Fix (b2w-local, shared deploy library untouched):
-
-- New [`RecurrentOrtRunner.h`](../unitree_rl_lab/deploy/robots/b2w/include/RecurrentOrtRunner.h) - detects carry-over state from the graph by the rsl-rl `<x>_in` / `<x>_out` naming (MLP → 0 pairs, GRU → 1, LSTM → 2), seeds the hidden state to zero, feeds `*_in`, and carries `*_out` forward each step. Backward compatible: a stateless MLP finds 0 pairs and behaves exactly like the stock runner, so the rough/teacher policies still deploy unchanged.
-- One construction line in [`State_RLBase.cpp`](../unitree_rl_lab/deploy/robots/b2w/src/State_RLBase.cpp) switches the runner to it.
-
-Then rebuild `b2w_ctrl` and run sim2sim as in [Section 4.7](#47-step-3---sim2sim-in-mujoco).
-
-</details>
-
 
 ## 6. Evaluation Matrix
+
+> **Not fully implemented.** This matrix works only for the PPO teacher policies. It does **not** support the current depth (CNN-LSTM) students - see [Section 4.6](#46-step-2a---evaluate-policies-per-level-evaluation-csv). Treat everything below as the teacher-only path, pending a rework that handles depth students.
 
 The evaluation entry point is `scripts/evaluation/evaluation.py`. It is an orchestrator around `eval_worker.py`: the orchestrator finds checkpoints and decides which tasks to run, while `eval_worker.py` owns the Isaac rollout.
 
@@ -1783,22 +1806,6 @@ Useful options:
 | `--robots_per_level` | Number of robots spawned on each level; default is `512` |
 | `--duration_s` | Optional rollout length. If omitted, it is chosen from both terrain and robot count. At `512` robots per level, every terrain (StaircaseUp/SlopeUp included) uses `20s`. |
 | `--headless` | Passes headless mode through to `eval_worker.py`. If omitted, the Isaac window can be shown so you can watch the evaluation. |
-
-### 6.2 How it picks terrains
-
-The orchestrator reads the experiment name and maps it to a registered Isaac task.
-
-Known examples:
-
-| Experiment name | Family | Terrain | Task used |
-|---|---|---|---|
-| `unitree_b2w_slopeup_teacher` | velocity | `SlopeUp` | `RobotLab-Isaac-Velocity-SlopeUp-Teacher-Unitree-B2W-v0` |
-| `unitree_b2w_staircaseup_teacher` | velocity | `StaircaseUp` | `RobotLab-Isaac-Velocity-StaircaseUp-Teacher-Unitree-B2W-v0` |
-| `unitree_b2w_flat` | velocity | `Flat` | `RobotLab-Isaac-Velocity-Flat-Unitree-B2W-v0` |
-| `unitree_b2w_rough` | velocity | `Rough` | `RobotLab-Isaac-Velocity-Rough-Unitree-B2W-v0` |
-| `unitree_b2w_rough_v1` | velocity | `RoughV1` | `RobotLab-Isaac-Velocity-Rough-Unitree-B2W-v1` |
-
-Each policy is cross-evaluated on the velocity terrains inferred from the policy list.
 
 ### 6.3 Evaluation Settings
 
@@ -1896,9 +1903,8 @@ summary_success_rate = (cleared_1 + cleared_2 + ... + cleared_9) / (512 * 9)
 Relevant `play.py` behavior:
 
 1. `--keyboard` drives the velocity command by setting `base_velocity` from the keyboard for velocity tasks.
-2. `--load_actor_only` skips critic weights when you intentionally load an actor into a task whose critic observation size differs.
-3. Normal play reduces generated terrain rows/columns to save memory.
-4. Normal play disables curriculum and random pushes, which makes the GUI easier to inspect.
+2. Normal play reduces generated terrain rows/columns to save memory.
+3. Normal play disables curriculum and random pushes, which makes the GUI easier to inspect.
 
 
 ## 7. Skills Trained On
@@ -1907,66 +1913,31 @@ This section tracks which skills the policy has been trained on and which are pl
 
 ### 7.1 Successfully trained on
 
-#### Teacher Policies  
-The following are the expert policies that have been extensively trained for about 5000 iterations on specific tasks:
-| Policy | Terrain | Notes |
-|---|---|---|
-| **Rough** (`unitree_b2w_rough`, the default `v0` task) | Mixed rough terrain (stairs, boxes, rough ground, slopes) | The general-purpose baseline policy. |
-| **StaircaseUp teacher** (`unitree_b2w_staircaseup_teacher`) | Upward staircases only (step height 6 cm → 20 cm, step width 27.5 cm) | Specialised stair-climbing teacher - see the worked example in [5.5](#55-worked-example-staircaseup-teacher). |
-| **SlopeUp teacher** (`unitree_b2w_slopeup_teacher`) | Upward slopes only (slope 0.0 → 0.50 rad, i.e. 0° → ~28.6°) | Specialised slope-climbing teacher; steeper than the rough task's ~22° slopes. |
+#### Teacher Policy
 
-> **Real-stair sim2real note:** the StaircaseUp curriculum is tuned to the physical staircase in the hanger - step height **16.8 ± 0.3 cm** and step width **27.8 ± 0.4 cm**. The terrain (`staircaseup_teacher_env_cfg.py`) uses a step-height range of 6-20 cm and a fixed 27.5 cm tread, so the real rise lands near the top of the curriculum with a small margin above it, and the trained tread is slightly narrower than reality (marginally harder in sim than on the real stairs).
+The current teacher is **rough-v1** (`unitree_b2w_rough_v1`), a privileged PPO policy trained on the mixed v1 terrain (60% stairs, 20% slopes, 20% obstacles - see [5.5](#55-worked-example-rough-v1-walking-policy-expert)). "Privileged" means it observes state the real robot cannot measure, in exchange for solving the hard exploration problem the student later imitates.
 
-#### Student Policies   
-Student policy exists at `/workspace/near-locomotion-quadruped/robot_lab/logs/rsl_rl/unitree_b2w_student`  
-The student was trained through the following method:
+Its observation is a **247-element vector**:
 
-#### Performance Table  
+| Block | Size | Contents |
+|---|---:|---|
+| Proprioception | 57 | base angular velocity (3), projected gravity (3), velocity commands (3), joint positions (16), joint velocities (16), previous actions (16) |
+| Base linear velocity | 3 | the body's linear velocity, read straight from sim state |
+| Elevation map (height scan) | 187 | terrain height sampled on a grid under the robot |
 
-Success rate (%) per terrain. Columns are the evaluated policies; rows are the test terrains.
+**The elevation map is the load-bearing privileged term.** A downward ray-caster ([`height_scanner`](../robot_lab/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/velocity_env_cfg.py#L70-L74)) is mounted on the base and casts rays straight down onto a **1.6 m x 1.0 m grid at 0.1 m resolution**. That grid is (1.6 / 0.1 + 1) x (1.0 / 0.1 + 1) = **17 x 11 = 187** points, one height sample each. Every value is the ground height under that cell relative to the robot, so the policy reads the shape of the terrain around and ahead of it - a step rising, a slope, an obstacle box - before a wheel touches it.
 
-| Terrain | $\pi_{slope}$ | $\pi_{stair}$ | $\pi_{student}$ |
-|---|---|---|---|
-| SlopeUp | 98.9 | 63.1 | 92.1 |
-| StaircaseUp | 8.2 | 99.6 | 92.9 |
+Mechanism -> consequence: with the terrain profile handed to it directly, PPO learns foot placement and body pitch for stairs and slopes **without any camera**. The cost is that this observation is not reproducible on hardware: a real B2W carries no downward terrain scanner. That gap is the whole reason a student is distilled (see [Section 12](#12-distillation-using-dagger-student)).
 
-#### Wandb Run Links
-Entity `vet3`. Exact runs chosen for the report and their context:
+#### Student Policy
 
-- **Student - 2 teachers** (staircaseup + slopeup) - `b2w_multiexpert/1xy7skcm`:
-  https://wandb.ai/vet3/b2w_multiexpert/runs/1xy7skcm/overview
-- **Student - 3 teachers** (staircaseup + slopeup + rough_v1) - `b2w_multiexpert/s8g5f228`:
-  https://wandb.ai/vet3/b2w_multiexpert/runs/s8g5f228/overview
-- **Staircase-up teacher** (`2026-06-22_03-50-54`, model_6497) - `b2w-staircaseup-teacher/5ljhqjd5`:
-  https://wandb.ai/vet3/b2w-staircaseup-teacher/runs/5ljhqjd5/overview
-- **Slope-up teacher** (`2026-06-22_05-52-28`) - `b2w-slopeup-teacher/4lsu3gsa`:
-  https://wandb.ai/vet3/b2w-slopeup-teacher/runs/4lsu3gsa
-- **Rough-v1 teacher** (3rd expert used by `s8g5f228`) - project `b2w-rough-v1`:
-  https://wandb.ai/vet3/b2w-rough-v1
+The current student is the **MultiExpert CNN-LSTM depth student**. It does **not** receive the 187-element height scan. It replaces that privileged elevation map with onboard sensing plus memory:
 
-Note: `1xy7skcm` is distilled from exactly the staircaseup (`5ljhqjd5`) and slopeup (`4lsu3gsa`)
-teachers above, so {`5ljhqjd5`, `4lsu3gsa`, `1xy7skcm`} is a self-consistent 2-teacher set.
-`s8g5f228` adds the `b2w-rough-v1` expert as a third teacher.
+- proprioception + commands (the `student` / `student_commands` observation groups),
+- two depth images, `depth_front` and `depth_rear` (each 1 x 32 x 48), each passed through its own convolutional encoder,
+- a two-layer LSTM that carries state across timesteps.
 
-
-### 7.2 What we want to train on next
-
-All of the following reuse the existing velocity env (`RobotLab-Isaac-Velocity-Rough-Unitree-B2W-v0`) and need **config-only changes** - no new task definitions or algorithms.
-
-<details>
-<summary><strong>Click to expand table</strong></summary>
-
-| Skill | How | Why useful |
-|---|---|---|
-| **Flat high-speed driving** | Already registered: `RobotLab-Isaac-Velocity-Flat-Unitree-B2W-v0`. Widen `commands.base_velocity.ranges.lin_vel_x` (the commented `(-2.0, 2.0)` lines in `rough_env_cfg.py`) | Exploits the wheels - fast, efficient rolling that legs-only robots can't do |
-| **Stair / curb / slope climbing** | Bias the terrain generator toward stairs + pyramids + gaps and let the terrain curriculum ramp difficulty | The headline wheeled-legged advantage: roll on flat, *step* over obstacles |
-| **Rock-solid stand-still (no drift)** | Increase the `stand_still` reward weight in `rough_env_cfg.py` + zero-command holding | Directly targets command-following drift at zero command - useful as its own objective |
-| **Payload robustness / push recovery** | Base + link mass are already randomized in `rough_env_cfg.py`; add external-force push events and heavier payload ranges | Carrying loads + surviving shoves = real-world deployment readiness |
-| **Energy-efficient locomotion** | Raise `joint_power` / `wheel_vel_penalty` reward weights | Minimizes cost-of-transport → battery life |
-| **Gait shaping** (trot/pace, or wheel-vs-step mode) | `feet_gait`, `feet_air_time` rewards (currently `feet_gait.weight = 0`) | Cleaner, more natural or task-specific gaits |
-| **Posture / ride-height control** | `base_height_l2` target height | Crouch under obstacles, raise to clear |
-
-</details>
+The depth cameras plus the LSTM's memory stand in for the height map: the student infers terrain geometry from what its cameras have seen over time, which is information a real robot can actually collect. Distilled students land under `robot_lab/logs/rsl_rl/unitree_b2w_multiexpert/`.
 
 ## 8. B2W Config (Verify Before Sim2Real)
 
@@ -2032,13 +2003,29 @@ Walk these six files top-to-bottom and confirm each matches the source of truth 
 | # | File | Verify |
 |---|---|---|
 | 1 | [`unitree.py`](../robot_lab/source/robot_lab/robot_lab/assets/unitree.py#L248-L320) `UNITREE_B2W_CFG` | effort / saturation / velocity limits match the URDF table (§8.1); leg `stiffness=160`, `damping=5`; wheel `stiffness=0`, `damping=1`; default pose `hip=0, thigh=0.8, calf=-1.5, wheel=0` |
-| 2 | [`rough_env_cfg.py`](../robot_lab/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/unitree_b2w/rough_env_cfg.py#L99-L106) | action scales `hip=0.125`, `thigh/calf=0.25`, `wheel=5.0`; obs scales `base_ang_vel=0.25`, `joint_vel=0.05`; `base_lin_vel` and `height_scan` set to `None` (policy is blind) |
-| 3 | [`deploy.yaml`](../unitree_rl_lab/deploy/robots/b2w/config/deploy.yaml) | leg `stiffness=160` / `damping=5`, wheel `kp=0` / `kd=1`; `default_joint_pos` = §8.1 pose; action `scale`/`offset` = row 2; observation order + scales; `step_dt: 0.02` (= sim dt `0.005` × decimation `4`) |
-| 4 | [`config.yaml`](../unitree_rl_lab/deploy/robots/b2w/config/config.yaml) | FixStand **hold** gains `kp=400` / `kd=8` (intentionally stiffer than the policy gains - hold only, not the RL gains); stand pose `qs`; `policy_dir` -> `unitree_b2w_multiexpert` |
-| 5 | [`b2w.xml`](../unitree_mujoco/unitree_robots/b2w/b2w.xml) | joint `range` = URDF; actuator `ctrlrange` hip/thigh `±200`, calf `±320`, wheel `±20`; wheel `ref` (set to `0` for the nominal robot - a non-zero `ref` injects the FixStand wheel-skid repro, see [§9.1](#91-fixstand-wheel-skid---bug-that-passed-in-sim-but-failed-on-the-real-robot)) |
+| 2 | [`rough_env_cfg.py`](../robot_lab/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/unitree_b2w/rough_env_cfg.py#L91-L97) | action scales `hip=0.125`, `thigh/calf=0.25`, `wheel=5.0`; obs scales `base_ang_vel=0.25`, `joint_vel=0.05`, `base_lin_vel=2.0`. **`base_lin_vel` and `height_scan` are ENABLED** - the `= None` lines are commented out, so the actor is 247 elements and is **not** blind |
+| 3 | [`deploy.yaml`](../unitree_rl_lab/deploy/robots/b2w/config/deploy.yaml) | leg `stiffness=160` / `damping=5`, wheel `kp=0` / `kd=1`; `default_joint_pos` = §8.1 pose; action `scale`/`offset` = row 2; observation order + scales; `step_dt: 0.02` (= sim dt `0.005` × decimation `4`). **This file encodes the 57-element blind contract and does not match row 2** - see [§4.4](#44-policy-generations-and-support-matrix) |
+| 4 | [`config.yaml`](../unitree_rl_lab/deploy/robots/b2w/config/config.yaml) | FixStand **hold** gains `kp=400` / `kd=8` (intentionally stiffer than the policy gains - hold only, not the RL gains); stand pose `qs`; SitDown `settle_time`/`duration`/`hold_time`/`wheel_kp`/`wheel_kd`; `policy_dir` currently -> `unitree_b2w_multiexpert`, which holds **undeployable** depth checkpoints and must be repointed |
+| 5 | [`b2w.xml`](../unitree_mujoco/unitree_robots/b2w/b2w.xml) | joint `range` = URDF; actuator `ctrlrange` hip/thigh `±200`, calf `±320`, wheel `±20`; wheel `ref` **ships at `50` on this branch by design** (the FixStand wheel-skid repro, [§9.1](#91-fixstand-wheel-skid---bug-that-passed-in-sim-but-failed-on-the-real-robot)) - **set it to `0` for a nominal run** |
 | 6 | [`config.yaml` (MuJoCo)](../unitree_mujoco/simulate/config.yaml) | `robot: "b2w"`; `interface: "lo"` for sim2sim; `use_joystick: 0` for keyboard |
 
 > **Gain sources differ by FSM state - this is intentional.** FixStand (row 4) uses a stiff `kp=400/kd=8` position hold to stand the robot up. The Velocity (RL) state uses `kp=160/kd=5` from `deploy.yaml` (row 3), matching the training asset. Do not "reconcile" these two - they are different controllers.
+
+#### Observation contract per policy generation
+
+Ordering and shape are **load-bearing interface requirements**: the C++ controller concatenates
+terms in `deploy.yaml` order and hands the raw buffer to ONNX. A reordered or resized term does not
+error - it silently feeds the policy the wrong numbers.
+
+| Generation | Contract | Deployable against `deploy.yaml`? |
+|---|---|---|
+| **Legacy blind** | `base_ang_vel`(3) → `projected_gravity`(3) → `velocity_commands`(3) → `joint_pos_rel_without_wheel`(16) → `joint_vel_rel`(16) → `last_action`(16) = **57** | **Yes** - this is the contract `deploy.yaml` describes |
+| **Current privileged teacher** | `base_lin_vel`(3) → `base_ang_vel`(3) → `projected_gravity`(3) → `velocity_commands`(3) → `joint_pos`(16) → `joint_vel`(16) → `actions`(16) → `height_scan`(187) = **247** | No - extra terms, and the robot has no height scanner |
+| **Current depth student** | Grouped, not flat: `student` (proprio incl. `base_lin_vel`, no `height_scan`, no command) + `student_commands`(3) + `depth_front`(1×32×48) + `depth_rear`(1×32×48) | No - `deploy.yaml` cannot express image groups, and there is no depth capture in C++ |
+
+> **Do not publish a flat element count for the depth student.** Its inputs are grouped tensors of
+> mixed rank; a single integer would be misleading. Derive the exact per-group sizes from the live
+> observation manager if you need them.
 
 ### 8.3 DCMotor Speed-Torque Matching in MuJoCo
 
@@ -2082,6 +2069,11 @@ mj_data_->ctrl[i] = apply_dcmotor_limit(i, tau, joint_vel);   // B2W legs only; 
 ## 9. Challenges Faced
 
 ### 9.1 FixStand wheel skid - bug that passed in sim but failed on the real robot
+
+> **Incident history, and the current shipped state.** The gain fix (step 2 below) is applied:
+> FixStand `kp` for wheel slots 12-15 is `0` in `config/config.yaml`. The **repro is still armed**:
+> `b2w.xml` ships with `ref="50"` on all four wheel joints by design. So the checked-in model is in
+> reproduction state, not nominal state. Set `ref="0"` to run nominally.
 
 **Challenge.** On the physical B2W, pressing `f` (FixStand / stand-up) made the wheels spin fast
 and the robot skid backward. The exact same policy and controller ran cleanly in MuJoCo
@@ -2174,7 +2166,7 @@ Every PPO hyperparameter referenced below is defined in one file,
 | `use_clipped_value_loss` | `True` | `rsl_rl_ppo_cfg.py` | [Value (Critic) Loss](#114-value-critic-loss) - enables the pessimistic clipped critic loss |
 | `entropy_coef` | `0.01` | `rsl_rl_ppo_cfg.py` | [Entropy Bonus](#115-entropy-bonus) - coefficient $c_e$ in the [combined loss](#112-the-combined-ppo-loss) |
 | `gamma` | `0.99` | `rsl_rl_ppo_cfg.py` | [GAE](#116-generalised-advantage-estimation-gae) - reward discount $\gamma$ |
-| `lam` | `0.95` | `rsl_rl_ppo_cfg.py` | [GAE](#116-generalised-advantage-estimation-gae) - baseline-trust factor $\lambda$ |
+| `lam` | `0.95` | `rsl_rl_ppo_cfg.py` | [GAE](#116-generalised-advantage-estimation-gae) - horizon-weighting factor $\lambda$ (higher = more weight on long-horizon sampled returns) |
 | `learning_rate` | `1.0e-3` | `rsl_rl_ppo_cfg.py` | [Adaptive KL LR schedule](#117-adaptive-kl-based-learning-rate-schedule) - initial LR |
 | `schedule` | `"adaptive"` | `rsl_rl_ppo_cfg.py` | [Adaptive KL LR schedule](#117-adaptive-kl-based-learning-rate-schedule) |
 | `desired_kl` | `0.01` | `rsl_rl_ppo_cfg.py` | [Adaptive KL LR schedule](#117-adaptive-kl-based-learning-rate-schedule) - target KL per update |
@@ -2182,7 +2174,9 @@ Every PPO hyperparameter referenced below is defined in one file,
 
 </details>
 
-> **NOTE:** $\gamma$ is the reward discount, while $\lambda$ separately controls how much the value baseline is trusted.
+> **NOTE:** $\gamma$ is the reward discount. $\lambda$ separately controls how far the advantage
+> estimate reaches into sampled rewards: higher $\lambda$ leans on longer sampled returns and less on
+> the bootstrapped value estimate.
 
 ### 11.2 The Combined PPO Loss
 
@@ -2222,10 +2216,17 @@ CLIP is asking how far I can trust this batch of data to tell me how to change t
      - $unclipped = 0.5\widehat{A}_t$ and $clipped = 0.8\widehat{A}_t$ (0.5 is below the floor of $[0.8, 1.2]$, so it is clamped to 0.8).
      - Since $\widehat{A}_t > 0$, both terms are positive, but $0.5\widehat{A}_t < 0.8\widehat{A}_t$, so min picks $0.5\widehat{A}_t$ (the unclipped one).
      - This gives a non-zero gradient that pushes $r_t$ back up toward 1 - i.e., it corrects the wrong-way update by incentivising the policy to increase the action's probability again.
-   - **Bad Action**: When $\widehat{A}_t < 0$, ratio is floored at $r_t = 1 - \varepsilon$.
-     - Suppose the update overshoots and drives $r_t$ down to $0.5$.
+   - **Bad Action**: When $\widehat{A}_t < 0$, the useful range is floored at $r_t = 1 - \varepsilon$.
+     - Suppose the update drives $r_t$ down to $0.5$ - i.e. the probability has *already* been pushed well below the floor, which is the direction we wanted.
      - Unclipped: $0.5 \times \widehat{A}_t$ (a negative number, since $\widehat{A}_t < 0$). Clipped: $0.8 \times \widehat{A}_t$ (clamped to $1 - \epsilon = 0.8$, also negative).
-     - With $\widehat{A}_t$ negative, $0.8\widehat{A}_t$ is more negative (smaller) than $0.5\widehat{A}_t$. So clip is chosen here to correct the action.
+     - With $\widehat{A}_t$ negative, $0.8\widehat{A}_t$ is *less* negative than $0.5\widehat{A}_t$; `min` in the objective (equivalently `max` on the loss) selects the clipped term $0.8\widehat{A}_t$.
+     - **What that selection actually does:** the clipped term is constant in $\theta$, so its gradient is **zero**. The objective is flat here. Clipping *stops the update from pushing this action's probability down any further*; it does not "correct the action". The credit was already taken at $r_t = 0.8$, and PPO declines to reward going beyond it.
+
+> **Read the flat regions correctly.** A clip that engages does not fix or reverse anything. It
+> removes the gradient, so the sample stops contributing. That is the whole trust-region mechanism:
+> once the policy has moved far enough on a sample, PPO stops paying for more movement. The only
+> case that yields a *corrective* non-zero gradient is Case 1b, where the ratio moved **opposite** to
+> what the advantage called for, so the unclipped term is the one selected.
 
 Here $\varepsilon$ is `clip_param` (see [Hyperparameters](#111-hyperparameters)).
 
@@ -2328,9 +2329,17 @@ $$= \text{Reward you got} + \text{Value estimate of where you landed} - \text{Va
 
 $$\widehat{A}_t^{(1)} = \delta_t = r_t + \gamma V(s_{t+1}) - V(s_t)$$
 
-$$\widehat{A}_t^{(2)} = \delta_t + \gamma\delta_{t+1} = r_t + \gamma r_{t+1} + \gamma^2 V(s_{t+1}) - V(s_t)$$
+$$\widehat{A}_t^{(2)} = \delta_t + \gamma\delta_{t+1} = r_t + \gamma r_{t+1} + \gamma^2 V(s_{t+2}) - V(s_t)$$
 
-$$\widehat{A}_t^{(\infty)} = \sum_{l=0}^{\infty} \gamma^l r_{t+1} - V(s_t)$$
+$$\widehat{A}_t^{(k)} = \sum_{l=0}^{k-1} \gamma^l \delta_{t+l} = \sum_{l=0}^{k-1} \gamma^l r_{t+l} + \gamma^k V(s_{t+k}) - V(s_t)$$
+
+$$\widehat{A}_t^{(\infty)} = \sum_{l=0}^{\infty} \gamma^l r_{t+l} - V(s_t)$$
+
+> **Check the indices.** Each reward and each TD residual advances with the summation index $l$: the
+> $k$-step estimate sums $\delta_t \ldots \delta_{t+k-1}$, collects rewards $r_t \ldots r_{t+k-1}$,
+> and bootstraps off $V(s_{t+k})$ - the state you actually land in after $k$ steps. The bootstrap
+> term telescopes away entirely as $k \to \infty$, leaving the pure Monte-Carlo return minus the
+> baseline.
 
 One-step estimate [$\widehat{A}_t^{(1)}$] has:
 
@@ -2346,22 +2355,33 @@ Therefore, GAE doesn't pluck on, but takes an exponentially weighted average of 
 
 $$\widehat{A}_t^{GAE(\gamma,\lambda)} = (1 - \lambda)\left(\widehat{A}_t^{(1)} + \lambda\widehat{A}_t^{(2)} + \lambda^2\widehat{A}_t^{(3)} + \ldots\right)$$
 
-$$\widehat{A}_t^{GAE(\gamma,\lambda)} = \sum_{l=0}^{\infty} (\gamma\lambda)^l \delta_{t+1}$$
+$$\widehat{A}_t^{GAE(\gamma,\lambda)} = \sum_{l=0}^{\infty} (\gamma\lambda)^l \delta_{t+l}$$
 
-> $\lambda = 0$ → pure 1-step, fully trusts $V$  
-> $\lambda = 1$ → Monte Carlo, ignores $V$ entirely  
-> $\lambda = 0.95$ → mostly trusts $V$ but keeps a long tail of actual rewards as a correction  
+> **$\lambda$ sets how far the estimate reaches into sampled rewards.** A *larger* $\lambda$ puts
+> more weight on the longer-horizon, more Monte-Carlo-like terms - more real sampled reward, less
+> reliance on the bootstrap. A *smaller* $\lambda$ concentrates weight on the short-horizon terms,
+> which lean on $V$.
+>
+> - $\lambda = 0$ → pure 1-step. Fully trusts $V$. Lowest variance, highest bias.
+> - $\lambda = 1$ → Monte Carlo. Ignores $V$ except as the baseline. Highest variance, lowest bias.
+> - $\lambda = 0.95$ → weights decay as $0.95^l$, so it reaches **tens of steps** into the sampled
+>   rewards. This is much closer to the Monte-Carlo end than to the 1-step end. It does **not** mean
+>   "mostly trusts $V$".
+
+Note $\delta_{t+l}$, not $\delta_{t+1}$: the residual advances with the summation index.
 
 > **NOTE**: $1-\lambda$ is just a normalisation factor to make the weights sum to 1.   
 > Without it, weights are $1, \lambda, \lambda^2, \ldots$ which sum to $\frac{1}{1-\lambda}$ (geometric series). So the whole thing would be scaled up by that factor.  
 > Multiplying by $(1-\lambda)$ cancels it:  
 > $$(1-\lambda)(1 + \lambda + \lambda^2 + \ldots) = (1-\lambda) \cdot \frac{1}{1-\lambda} = 1$$
 
-RSL-RL computes this using:
+RSL-RL computes this with the equivalent backward recursion:
 
-$$\widehat{A}_t = \delta_t + \gamma\lambda(1 - done_t)\widehat{A}_t$$
+$$\widehat{A}_t = \delta_t + \gamma\lambda(1 - done_t)\,\widehat{A}_{t+1}$$
 
-Where $done_t$ is just the flag that is set to 1 when the episode is completed.
+Expanding the recursion reproduces $\sum_{l} (\gamma\lambda)^l \delta_{t+l}$ exactly, which is why
+one reversed pass over the rollout suffices. $done_t$ is the flag set to 1 when the episode
+terminated at step $t$; it zeroes the carry so advantage never bleeds across an episode boundary.
 
 $$R_t = \widehat{A}_t + V(s_t)$$
 
@@ -2506,36 +2526,67 @@ Use the log-derivative trick in reverse: $\pi_\theta \nabla_\theta \log\pi_\thet
 
 $$\int \nabla_\theta \pi_\theta(a \mid s)\ da = \nabla_\theta \int \pi_\theta(a \mid s)\ da = \nabla_\theta(1) = 0$$
 
-> ***Example**: if a score is* $100 \pm 2$*, it ranges over* $[98, 102]$*, so the bias is* $\pm 2$*. If you subtract 50 from the score, the range is still* $[48, 52]$*, so the bias (expected direction) is still* $\pm 2$*. Bias is unchanged, but smaller-magnitude gradients with the same expected direction means much less variance.*
-
-**Privileged information** is part of the true simulator state $s$. So conditioning the baseline on it, $V(s_{\text{priv}})$, still keeps the gradient (asymptotically) unbiased while sharply cutting variance, because a more accurate baseline cancels more noise. Crucially, the privileged knowledge "leaks" into the actor <u>only through the scalar advantage number</u>, never through the <u>deployed input-output mapping</u>. The actor never sees a height-scan; it just receives better-shaped learning signals because of it.
-
-> **NOTE:** When the actor is only **partially** observed (it sees proprioception like base angular velocity, joint positions, last action, etc., but **not** the privileged state), a small bias can creep into the policy gradient. The cause is the information **gap**: the critic's baseline $V(s)$ conditions on privileged variables (height-scan, true linear velocity, friction) that the actor never observed, so it is no longer a clean function of the actor's observation $o$ alone, and the baseline term stops cancelling exactly in expectation. So the equation becomes:
+> **Why a *constant* shift is the wrong example.** Subtracting a constant $c$ from every sample moves
+> the mean but leaves the spread untouched: $\mathrm{Var}(X - c) = \mathrm{Var}(X)$. A score of
+> $100 \pm 2$ shifted to $50 \pm 2$ still has variance 4. Constants buy nothing.
 >
-> $$\mathbb{E}_{a \sim \pi_\theta(\bullet \mid o)}[\nabla_\theta \log\pi_\theta(a \mid o)\ b(s)]$$
+> **The baseline works because it is correlated with the thing it subtracts.** Write the per-sample
+> gradient as $g = \nabla_\theta \log\pi_\theta(a\mid s)\,(Q(s,a) - b(s))$. Then
 >
-> where the state observed is no longer the same.
+> $$\mathrm{Var}(g) \;\propto\; \mathbb{E}\big[(Q(s,a) - b(s))^2\big] \;-\; (\text{unchanged mean})^2 .$$
+>
+> Only the **first** term moves, and it is minimised by choosing $b(s)$ as close to $Q(s,a)$ as a
+> state-only function can get - that is, $b(s) = V(s) = \mathbb{E}_a[Q(s,a)]$.
+>
+> *Concrete example.* Suppose in state $s$ two actions give $Q = 100$ and $Q = 104$, each with
+> probability $\tfrac12$. With $b = 0$ the multiplier is $\{100, 104\}$: mean 102, spread $\pm 2$ on
+> a scale of 100. With $b(s) = V(s) = 102$ the multiplier becomes $\{-2, +2\}$: same mean-zero
+> structure, but now the magnitude carries only the part that **varies with the action**. The
+> gradient stops being dominated by a large action-independent offset that averages to nothing. That
+> is the variance reduction - it comes from removing the shared, action-independent component, not
+> from shifting numbers downward.
 
-The clean fix is a value function defined over the actor's observation-history rather than over privileged state; in practice the variance reduction outweighs the small bias, so the privileged critic is used anyway.
+**Privileged information** is part of the true simulator state $s$. So conditioning the baseline on it, $V(s_{\text{priv}})$, still keeps the gradient unbiased while sharply cutting variance, because a more accurate baseline tracks $Q$ more closely and therefore cancels more noise. Crucially, the privileged knowledge "leaks" into the actor <u>only through the scalar advantage number</u>, never through the <u>deployed input-output mapping</u>. The actor never sees a height-scan; it just receives better-shaped learning signals because of it.
+
+> **NOTE - the baseline stays unbiased even when the actor sees less than the critic.** The proof of
+> unbiasedness needs only one property of $b$: that it does **not** depend on the action $a$. It does
+> not require $b$ to be a function of the actor's observation. Taking the expectation over
+> $a \sim \pi_\theta(\cdot \mid o)$ at a fixed underlying state $s$:
+>
+> $$\mathbb{E}_{a \sim \pi_\theta(\cdot \mid o)}\big[\nabla_\theta \log\pi_\theta(a \mid o)\, b(s)\big] = b(s)\, \nabla_\theta \!\! \int \!\! \pi_\theta(a \mid o)\, da = b(s)\, \nabla_\theta 1 = 0 .$$
+>
+> $b(s)$ factors straight out because it is constant with respect to $a$, and the score function still
+> integrates to zero. The term vanishes exactly. **An asymmetric actor does not, by itself, make the
+> privileged critic bias the policy gradient.**
+
+What the information gap *does* cost is **estimator quality**, not correctness. $V(s_{\text{priv}})$
+is a fine baseline, but it is not the *variance-minimising* one for a partially-observed actor: the
+minimiser is a value function over what the actor actually conditions on, $V(o)$ or a value function
+over its observation history. Using the privileged critic is a deliberate trade - it is far easier to
+fit accurately, and in practice the variance it removes outweighs what the mismatch costs. That is
+why the privileged critic is used.
 
 ---
 
 ## 12. Distillation using DAGGER (Student)
 
-Section 11 trained the **teacher** with PPO, whose privileged critic could see information the real robot will never have. But the **deployed** policy can only use what the onboard sensors provide (proprioception + velocity commands). This section covers how that privileged knowledge is turned into a deployable **student**.
+Section 11 trained the **teacher** with PPO, whose privileged critic could see information the real robot will never have. But a **deployable** policy can only use what the onboard sensors provide. This section covers the general mechanism by which teacher knowledge is transferred to a student.
 
 ### 12.1 Teacher-Student Distillation Training
 
 In a teacher-student distillation setup:
 
-- The **teacher** (exteroceptive) is the PPO actor from Section 11, trained with RL using privileged terrain and state information.
-- The **student** (proprioceptive-only) is trained to imitate the teacher. To compensate for the privileged observations it lacks (height-scan, base linear velocity), the student is given temporal memory - either a recurrent core (LSTM/GRU) or a stacked observation-history - so it can implicitly infer that missing state.
-- In this repo, the **default** B2W student (`UnitreeB2WRoughDistillationRunnerCfg`) is a feed-forward MLP `[256, 128, 128]`; the recurrent LSTM student (`UnitreeB2WRoughDistillationRunnerRecurrentCfg`) is an **opt-in variant**, not the default.
+- The **teacher** is the PPO actor from Section 11, trained with RL using privileged terrain and state information.
+- The **student** is trained to imitate the teacher. Where the student lacks privileged observations, it is given temporal memory - a recurrent core (LSTM/GRU) or a stacked observation-history - so it can implicitly infer the missing state, and/or real sensing such as depth cameras.
 
-This is better than training the proprioceptive policy directly with RL because of a clean division of labour:
+![CNN-LSTM depth student architecture: two depth cameras through per-image CNN encoders and FC stages, concatenated with proprioception into a 2-layer LSTM, then a head MLP that also reads a proprio skip and a commands bypass, producing 16 actions.](assets/cnn-lstm-student.svg)
+
+*The MultiExpert student's forward pass. Each depth image goes through its own CNN encoder and per-image FC to a 64-dim latent; the two latents plus 57-dim proprioception (185 total) feed the 2-layer LSTM. The head MLP reads the LSTM output (256) plus a proprio skip (57) and a commands bypass (3), 316 in total, and outputs 16 actions. See [Section 13.2.3](#1323-observation-contract) for the observation contract.*
+
+This division of labour is why distillation beats training the limited-sensor policy directly with RL:
 
 - The privileged teacher solves the hard exploration and credit-assignment problem using information the student will never have.
-- The student solves the easier problem of mimicking a known-good policy from limited sensing.
+- The student solves the easier problem of mimicking a known-good policy from its own sensing.
 
 ### 12.2 DAGGER (Dataset Aggregation)
 
@@ -2571,7 +2622,20 @@ $$\text{cost}_{DAgger} = O(T\epsilon)$$
 
 #### 12.2.3 RSL-RL Implementation: DAgger
 
-RSL-RL's Distillation algorithm is a streaming, single-iteration-per-rollout DAgger. The teacher and student are 2 separate model objects, `self.student` and `self.teacher` in `distillation.py`.
+RSL-RL's Distillation algorithm is **DAgger-style**, not classic DAgger. The teacher and student are 2 separate model objects, `self.student` and `self.teacher` in `distillation.py`.
+
+> **What it shares with DAgger:** the *learner* drives. The student picks the action that steps the
+> simulator, so the states it trains on are exactly the states its own policy visits. This is the
+> property that kills the $O(T^2\epsilon)$ compounding in [12.2.1](#1221-behaviour-cloning).
+>
+> **What it does not do:** there is no **dataset aggregation**. Classic DAgger maintains a growing
+> dataset $\mathcal{D} \leftarrow \mathcal{D} \cup \mathcal{D}_i$ across iterations and retrains on
+> the union every round - the "Aggregation" in the name. Here, `update()` ends with
+> `self.storage.clear()`: each rollout is consumed by a couple of gradient epochs and then
+> **discarded**. Nothing persists, nothing is relabelled, nothing is retrained on.
+>
+> Describe it as **online, learner-driven, DAgger-style imitation**. Calling it "DAgger" unqualified
+> implies a replay buffer this code does not have.
 
 **Data collection (`act`):** the student picks the action that gets executed, and the teacher is asked, at that same state, what *it* would have done. That teacher action becomes the label.
 
@@ -2674,6 +2738,16 @@ def update(self) -> dict[str, float]:
 
 ## 13. Code Walkthrough: train.py
 
+> **Where the RSL-RL internals quoted below live.** Line numbers for `on_policy_runner.py`,
+> `ppo.py`, `distillation.py` and friends refer to **`rsl-rl-lib` 5.4.1**, the version this container
+> installs. They are not linked, because the package is installed into the Isaac Sim runtime
+> (`/isaac-sim/kit/python/lib/python3.11/site-packages/rsl_rl/`), which is outside this repository
+> and is rebuilt with the container. Read it there, or at the matching upstream tag. Line numbers
+> will drift if the pinned version changes.
+>
+> Install it with `--no-deps`. `torch` is bundled by the Isaac Sim kit and is invisible to pip, so a
+> plain `pip install rsl-rl-lib` will trample the working torch install.
+
 ### 13.1 PPO
 
 <details>
@@ -2690,10 +2764,10 @@ From `train.py`,
 2. [Line 205-206](../robot_lab/scripts/reinforcement_learning/rsl_rl/train.py#L205-L206):
 
    ```python
-   runner = OnPolicynRunner(env, agent_cfg.to_dict(), log_dir=log_dir, device=agent_cfg.device)
+   runner = OnPolicyRunner(env, agent_cfg.to_dict(), log_dir=log_dir, device=agent_cfg.device)
    ```
 
-   - [Line 39-40](../../../isaac-sim/kit/python/lib/python3.11/site-packages/rsl_rl/runners/on_policy_runner.py#L39-L40) of `on_policy_runner.py`:
+   - Line 39-40 of `on_policy_runner.py`:
 
      ```python
      # Create the algorithm
@@ -2702,7 +2776,7 @@ From `train.py`,
      ```
 
      1. Since `cfg["algorithm"]["class_name"] == "PPO"`, it then calls `PPO.construct_algorithm()` in `ppo.py`.
-     2. [Line 476-478](../../../isaac-sim/kit/python/lib/python3.11/site-packages/rsl_rl/algorithms/ppo.py#L476-L478), builds actor-critic class:
+     2. Line 476-478, builds actor-critic class:
 
         ```python
         alg_class: type[PPO] = resolve_callable(cfg["algorithm"].pop("class_name")
@@ -2710,7 +2784,7 @@ From `train.py`,
         critic_class: type[MLPModel] = resolve_callable(cfg["critic"].pop("class_name"))
         ```
 
-     3. [Lines 493-501](../../../isaac-sim/kit/python/lib/python3.11/site-packages/rsl_rl/algorithms/ppo.py#L493-L501) initialise the Actor, Critic, followed by RolloutStorage, and the PPO object which is the `self.alg`
+     3. Lines 493-501 initialise the Actor, Critic, followed by RolloutStorage, and the PPO object which is the `self.alg`
 
 3. If resume, previously trained model is loaded in, through [Line 214-217](../robot_lab/scripts/reinforcement_learning/rsl_rl/train.py#L214-L217):
 
@@ -2727,9 +2801,9 @@ From `train.py`,
    runner.learn(num_learning_iterations=agent_cfg.max_iterations, init_at_random_ep_len=True)
    ```
 
-   a. [Line 66](../../../isaac-sim/kit/python/lib/python3.11/site-packages/rsl_rl/runners/on_policy_runner.py#L66) in `on_policy_runner` calls `train_mode()`, which is called on `ppo.py` as well:
+   a. Line 66 in `on_policy_runner` calls `train_mode()`, which is called on `ppo.py` as well:
 
-      1. On `ppo.py`, both actor and critic are set to train, in [Line 418-421](../../../isaac-sim/kit/python/lib/python3.11/site-packages/rsl_rl/algorithms/ppo.py#L418-L421):
+      1. On `ppo.py`, both actor and critic are set to train, in Line 418-421:
 
          ```python
          def train_mode(self) -> None:
@@ -2740,7 +2814,7 @@ From `train.py`,
 
          Note that the `train()` method here is from MLP library
 
-   b. [Line 76 – 105](../../../isaac-sim/kit/python/lib/python3.11/site-packages/rsl_rl/runners/on_policy_runner.py#L76-L105) is the entire training process.
+   b. Line 76 – 105 is the entire training process.
 
       ```python
       # Start training
@@ -2774,7 +2848,7 @@ From `train.py`,
           self.alg.compute_returns(obs)
       ```
 
-   c. Subsequently in [line 108](../../../isaac-sim/kit/python/lib/python3.11/site-packages/rsl_rl/runners/on_policy_runner.py#L108), the `update()` function from earlier is called, which does the main loss calculation and backprop.
+   c. Subsequently in line 108, the `update()` function from earlier is called, which does the main loss calculation and backprop.
 
       ```python
       # Update policy
@@ -2783,10 +2857,196 @@ From `train.py`,
 
 </details>
 
-### 13.2 Distillation (MLP Student)
+### 13.2 MultiExpert Distillation (CNN-RNN Student)
+
+The distillation concept and the CNN-LSTM student architecture are covered in [Section 12.1](#121-teacher-student-distillation-training); this section is the code walkthrough.
 
 <details>
-<summary>Click to expand the MLP student walkthrough</summary>
+<summary>Click to expand the multi-expert CNN-LSTM student walkthrough</summary>
+
+#### 13.2.1 Scope and implementation map
+
+**Registered task:** `RobotLab-Isaac-Velocity-MultiExpert-Teacher-Unitree-B2W-v0`
+
+```bash
+setup_isaaclab
+cd /workspace/near-locomotion-quadruped/robot_lab
+python scripts/reinforcement_learning/rsl_rl/train.py \
+  --task=RobotLab-Isaac-Velocity-MultiExpert-Teacher-Unitree-B2W-v0 \
+  --agent=rsl_rl_distillation_recurrent_cfg_entry_point \
+  --headless
+```
+
+Five load-bearing files:
+
+| Role | File |
+|---|---|
+| Environment config: terrain merge, cameras, obs groups | [`multiexpert_teacher_env_cfg.py`](../robot_lab/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/unitree_b2w/multiexpert_teacher_env_cfg.py) |
+| Runner config: student model, obs group mapping, algorithm | [`agents/rsl_rl_multiexpert_distillation_cfg.py`](../robot_lab/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/unitree_b2w/agents/rsl_rl_multiexpert_distillation_cfg.py) |
+| Expert-routing algorithm | [`mdp/distillation/multiteacher.py`](../robot_lab/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/distillation/multiteacher.py) |
+| CNN-LSTM student model | [`mdp/distillation/cnn_rnn_model.py`](../robot_lab/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/distillation/cnn_rnn_model.py) |
+| Depth observation + domain randomization | [`mdp/observations.py`](../robot_lab/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/observations.py) |
+
+> **Scope.** This section describes the **current branch**, as built. It does not describe every
+> historical checkpoint under `logs/rsl_rl/unitree_b2w_multiexpert/` - older runs there predate the
+> depth cameras and have a different observation contract.
+
+#### 13.2.2 Teacher roster and terrain routing
+
+One object at a time.
+
+1. **Each active `teachers.txt` row supplies two fields**: a task id and a PPO checkpoint path.
+   `parse_teachers_txt` reads exactly those two; the line index becomes the expert id.
+2. **The environment builds terrain from each teacher's task.** `build_multiexpert_terrain` loads
+   each listed task's env cfg, takes its `sub_terrains`, and merges them into one curriculum terrain,
+   prefixing keys (`e0_`, `e1_`, ...) to keep them unique. Each teacher's proportions already sum to
+   1, so once the merged proportions are normalized every expert gets an equal share of columns.
+3. **Each env receives an expert id from its terrain column.** The merged proportions become a
+   deterministic column → expert map mirroring the generator's own column formula.
+4. **The algorithm computes every teacher's action, then gathers the selected one** - see
+   [13.2.6](#1326-training-step-and-loss).
+
+> **The current roster has one active entry** (`RobotLab-Isaac-Velocity-Rough-Unitree-B2W-v1`). The
+> machinery supports N experts; this roster exercises one. A run against it is the multi-expert
+> *mechanism* driving a single expert. It is not a multi-expert *result*.
+
+#### 13.2.3 Observation contract
+
+| Consumer | Observation groups | Important contents |
+|---|---|---|
+| **Teacher** | `policy` | The full privileged teacher observation, height scan included. Unchanged, so the frozen PPO weights load |
+| **Student encoder and recurrent core** | `student`, `depth_front`, `depth_rear` | `student` is a deep copy of `policy` with `height_scan = None` and `velocity_commands = None`. **Base linear velocity is retained.** Plus two depth images |
+| **Student command bypass** | `student_commands` | The velocity command alone, kept out of the recurrent visual-proprioceptive stream |
+
+```python
+# rsl_rl_multiexpert_distillation_cfg.py
+obs_groups = {
+    "student": ["student", "student_commands", "depth_front", "depth_rear"],
+    "teacher": ["policy"],
+}
+```
+
+```python
+# multiexpert_teacher_env_cfg.py - _add_depth_perception()
+student = copy.deepcopy(self.observations.policy)
+student.height_scan = None        # privileged: removed
+student.velocity_commands = None  # moved to its own group, not removed from the student's view
+self.observations.student = student
+```
+
+> **The student is not proprioception-only, and it is not blind.** It keeps `base_lin_vel`. Only
+> `height_scan` is taken away, and two depth cameras are added in exchange.
+
+> **No flat element count is published here.** The student's inputs are grouped tensors of mixed rank
+> - 1D proprioception, a 1D command, and two 4D image batches. A single integer such as "57" cannot
+> describe them and would be misleading. Derive per-group sizes from the live observation manager.
+
+#### 13.2.4 Cameras and depth processing
+
+| Property | Value |
+|---|---|
+| Cameras | 2 - `depth_cam_front`, `depth_cam_rear`, both `RayCasterCameraCfg` |
+| Resolution | **48 × 32** pixels (W × H) |
+| Horizontal field of view | **87°** |
+| Focal length | Derived, not hand-set: `horizontal_aperture / (2·tan(HFOV/2))` ≈ 11.04 cm |
+| Update rate | **15 Hz** (`update_period = 1/15`) while the policy runs at 50 Hz |
+| Usable range | **0.15 m** (`min_range`) to **2.0 m** (`max_range`) |
+| Ray-cast target | `/World/ground` only |
+| Data type | `distance_to_image_plane` (Z-depth in metres) |
+| Out-of-range behaviour | `depth_clipping_behavior="max"` → misses read as far |
+
+- **Why ray-cast `/World/ground` only.** The camera is blind to the robot's own legs, exactly like
+  `height_scanner`. That is what makes it cheap across thousands of envs.
+- **Why 15 Hz matters.** The policy steps at 50 Hz, so the sensor serves the same image for ~3
+  consecutive policy steps. That staleness is deliberate - it matches what a real camera delivers.
+
+Preprocessing and domain randomization live in the **stateful class term** `DepthImageDR`
+([`mdp/observations.py`](../robot_lab/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/observations.py)).
+It is a class, not a function, because two of its corruptions need memory across steps.
+
+```python
+img = env.scene.sensors[sensor_cfg.name].data.output["distance_to_image_plane"].clone()
+img[img < min_range] = max_range                                  # too-close pixels read as far
+img = (img.clamp(max=max_range) / max_range).permute(0, 3, 1, 2)  # (B,1,H,W), scaled to [0,1]
+```
+
+All corruptions run in that space, where **empty == far == 1.0**, and are applied in this order:
+
+| Stage | Cadence | Mechanism | Key parameters |
+|---|---|---|---|
+| **Edge noise** | Per step | Sobel gradient magnitude finds depth discontinuities; the mask is dilated one pixel so the band straddles the edge; those pixels are emptied or replaced by a random 4-neighbour | `edge_thresh=0.1`, `edge_p_empty=0.5`, `edge_p_shuffle=0.5` |
+| **Holes** | Temporally consistent | A per-env Perlin (2002) gradient-noise field thresholded into patches of max depth. The lattice gradient **angles** random-walk each step, so patches drift slowly. Rotating a *unit* gradient keeps the noise amplitude stationary, so hole coverage stays constant | `hole_thresh=0.25`, `6 × 8` lattice, `_DR_PERLIN_ROT_STD=0.05` rad/step |
+| **Blind spot** | Per episode | The leftmost `k` columns are emptied; `k` re-rolled on reset | `blind_min=1`, `blind_max=5` |
+| **Gaussian blur** | Per step | Applied **last**, so it smooths the artifacts the earlier stages injected | `blur_kernel=3`, `blur_sigma=0.8` |
+
+Two details that carry real weight:
+
+- **The Sobel input is replicate-padded**, not zero-padded. Zero-padding would fabricate a depth
+  cliff along the image border and generate edge noise that is not there.
+- **`reset(env_ids)` re-rolls the per-episode state.** The obs manager fires it for terminated envs,
+  so a hole field or blind column never leaks across an episode boundary.
+
+Disabling every `enable_*` flag leaves the clean clip + scale + permute baseline. That is the
+ablation switch.
+
+> **Do not port older descriptions into this section.** There is no `depth_image` function and no
+> Ornstein-Uhlenbeck noise process in this implementation. The class above is the whole story.
+
+#### 13.2.5 Student network
+
+**Mechanism first, dimensions second.**
+
+1. Each camera has its **own** convolutional encoder - front and rear do not share weights.
+2. Each encoded image passes through its **own FC stack** down to a small latent.
+3. The image latents are concatenated with **proprioception** and fed to the LSTM. This is the stream
+   that needs memory: sensor history.
+4. **Commands bypass the LSTM** and rejoin at the head. An instruction should not be integrated into
+   a state estimate.
+5. **Proprioception re-enters at the head** too, alongside the LSTM output - the head sees both
+   integrated history and the current raw reading.
+6. The head emits **16 actions** (12 leg positions + 4 wheel velocities).
+
+```python
+# cnn_rnn_model.py - CNNRNNModel.get_latent()
+z_img = torch.cat(
+    [self.cnn_fcs[group](self.cnns[group](obs[group])) for group in self.obs_groups_2d], dim=-1
+)
+proprio  = torch.cat([obs[group] for group in self.proprio_obs_groups], dim=-1)
+commands = torch.cat([obs[group] for group in self.command_obs_groups_active], dim=-1)
+
+# LSTM over [proprio, depth latents]; commands bypass it
+z_rnn = self.rnn(torch.cat([proprio, z_img], dim=-1), masks, hidden_state).squeeze(0)
+
+# Head input: [LSTM out, proprio, commands]
+return torch.cat([z_rnn, proprio, commands], dim=-1)
+```
+
+**Verified dimensions**, from `rsl_rl_multiexpert_distillation_cfg.py`:
+
+| Component | Value |
+|---|---|
+| Conv output channels, per camera | `[32, 64, 64]`, kernel 3, stride 1, no padding, ELU, max-pool, flatten |
+| Per-image FC stack | `[128, 64]` → a **64-dim latent per image** |
+| LSTM | `rnn_type="lstm"`, **hidden size 256**, **2 layers** |
+| LSTM input width | `proprio_dim + 64 × 2` (two cameras) |
+| Head hidden dims | `[256, 128, 128]`, ELU |
+| Head input width | `256 (LSTM) + proprio_dim + cmd_dim` |
+| Output | 16 actions |
+| Initial action std | `0.1` |
+| TBPTT gradient length | **24** |
+| Obs normalization | `False` - explicitly unsupported |
+
+> **Why `obs_normalization` raises rather than silently working.** The head splits the 1D
+> observations into proprio and commands, but `EmpiricalNormalization` is a single monolithic module
+> sized to their sum, so it cannot be applied per-part. These observations already carry per-term
+> scales, so the constructor raises `NotImplementedError` rather than quietly normalizing the wrong
+> thing.
+
+#### 13.2.6 Training step and loss
+
+The causal order: the **student** samples the action that advances the simulator; **all** teachers
+evaluate that same state; the env's **expert id** selects one teacher action per env; **MSE** trains
+the student toward it; **truncated recurrent sequences** carry the hidden state during optimization.
 
 From `train.py`,
 
@@ -2802,267 +3062,17 @@ From `train.py`,
    runner = DistillationRunner(env, agent_cfg.to_dict(), log_dir=log_dir, device=agent_cfg.device)
    ```
 
-   a. From here `DistillationRunner` has no `__init__`, so `OnPolicyRunner.__init__`
+   a. From here `DistillationRunner` has no `__init__`, so `OnPolicyRunner.__init__` runs.
 
-   b. [Line 39-40](../../../isaac-sim/kit/python/lib/python3.11/site-packages/rsl_rl/runners/on_policy_runner.py#L39-L40) of `on_policy_runner.py`:
-
-      ```python
-      alg_class: type[PPO] = resolve_callable(self.cfg["algorithm"]["class_name"])
-      self.alg = alg_class.construct_algorithm(obs, self.env, self.cfg, self.device)
-      ```
-
-      1. Since `cfg["algorithm"]["class_name"] == "Distillation"`, it then calls `Distilation.construct_algorithm()` in `distillation.py`. In `construct_algorithm()`, new student of type MLP model is randomly initialised, as defined in `distillation.py`.
-      2. [Line 238-240](../../../isaac-sim/kit/python/lib/python3.11/site-packages/rsl_rl/algorithms/distillation.py#L238-L240):
-
-         ```python
-         alg_class: type[Distillation] = resolve_callable(cfg["algorithm"].pop("class_name"))
-         student_class: type[MLPModel] = resolve_callable(cfg["student"].pop("class_name"))
-         teacher_class: type[MLPModel] = resolve_callable(cfg["teacher"].pop("class_name"))
-         ```
-
-      3. [Lines 254-270](../../../isaac-sim/kit/python/lib/python3.11/site-packages/rsl_rl/algorithms/distillation.py#L254-L270) initialise the Student, Teacher, followed by RolloutStorage, and the Distillation object which is the `self.alg`
-
-3. [Line 217](../robot_lab/scripts/reinforcement_learning/rsl_rl/train.py#L217):
-
-   ```python
-   runner.load(resume_path)
-   ```
-
-   a. This calls `OnPolicyRunner.load()` in [Line 145](../../../isaac-sim/kit/python/lib/python3.11/site-packages/rsl_rl/runners/on_policy_runner.py#L145), which calls Distillation algorithm's `load()` function, in [Line 158](../../../isaac-sim/kit/python/lib/python3.11/site-packages/rsl_rl/runners/on_policy_runner.py#L158):
-
-      ```python
-      load_iteration = self.alg.load(loaded_dict, load_cfg, strict)
-      ```
-
-      1. The objective of this line is to load the teacher
-      2. NOTE: By default, when student is trained from scratch, `load_cfg = None`, and `distillation.py` will leave the random student initialised earlier, untouched.
-      3. BUT, if training from existing, student, `load_cfg` must be set before `runner.load()`
-
-         So, `load_cfg` just loads student in as warm_start, setting "student" as True.
-
-4. [Line 224](../robot_lab/scripts/reinforcement_learning/rsl_rl/train.py#L224):
-
-   ```python
-   runner.learn(num_learning_iterations=agent_cfg.max_iterations, init_at_random_ep_len=True)
-   ```
-
-   a. Overriden by `distillation_runner.py`, the one method it overrides. Which just acts as a guard to check whether teacher is loaded.
-
-   b. [Line 66](../../../isaac-sim/kit/python/lib/python3.11/site-packages/rsl_rl/runners/on_policy_runner.py#L66) in `on_policy_runner` calls `train_mode()`, which is called on `distillation.py` as well:
-
-      ```python
-      self.alg.train_mode()
-      ```
-
-      1. On `distillation.py`, student is set to train, and teacher is set to eval, [Line 169-174](../../../isaac-sim/kit/python/lib/python3.11/site-packages/rsl_rl/algorithms/distillation.py#L169-L174):
-
-         ```python
-         def train_mode(self) -> None:
-             """Set train mode for the student and keep the teacher in eval mode."""
-             self.student.train()
-             # Teacher is always in eval mode
-             self.teacher.eval()
-         ```
-
-   c. [Line 76 – 105](../../../isaac-sim/kit/python/lib/python3.11/site-packages/rsl_rl/runners/on_policy_runner.py#L76-L105) is the entire training process.
-
-      ```python
-      # Start training
-      start_it = self.current_learning_iteration
-      total_it = start_it + num_learning_iterations
-      for it in range(start_it, total_it):
-          start = time.time()
-          # Rollout
-          with torch.inference_mode():
-              for _ in range(self.cfg["num_steps_per_env"]):
-                  # Sample actions
-                  actions = self.alg.act(obs)
-                  # Step the environment
-                  obs, rewards, dones, extras = self.env.step(actions.to(self.env.device))
-                  # Check for NaN values from the environment
-                  if self.cfg.get("check_for_nan", True):
-                      check_nan(obs, rewards, dones)
-                  # Move to device
-                  obs, rewards, dones = (obs.to(self.device), rewards.to(self.device), dones.to(self.device))
-                  # Process the step
-                  self.alg.process_env_step(obs, rewards, dones, extras)
-                  # Extract intrinsic rewards if RND is used (only for logging)
-                  intrinsic_rewards = self.alg.intrinsic_rewards if self.cfg["algorithm"]["rnd_cfg"] else None
-                  # Book keeping
-                  self.logger.process_env_step(rewards, dones, extras, intrinsic_rewards)
-
-          stop = time.time()
-          collect_time = stop - start
-          start = stop
-          # Compute returns
-          self.alg.compute_returns(obs)
-      ```
-
-   d. Subsequently in [line 108](../../../isaac-sim/kit/python/lib/python3.11/site-packages/rsl_rl/runners/on_policy_runner.py#L108), the `update()` function from earlier is called, which does the main loss calculation and backprop.
-
-      ```python
-      # Update policy
-      loss_dict = self.alg.update()
-      ```
-
-</details>
-
-### 13.3 Distillation (LSTM Student)
-
-<details>
-<summary>Click to expand the LSTM student walkthrough</summary>
-
-From `train.py`,
-
-1. [Line 88](../robot_lab/scripts/reinforcement_learning/rsl_rl/train.py#L88): Note `DistillationRunner` is just there to act as guard for <u>point 4</u>
-
-   ```python
-   from rsl_rl.runners import DistillationRunner, OnPolicyRunner
-   ```
-
-2. [Line 207-208](../robot_lab/scripts/reinforcement_learning/rsl_rl/train.py#L207-L208):
-
-   ```python
-   runner = DistillationRunner(env, agent_cfg.to_dict(), log_dir=log_dir, device=agent_cfg.device)
-   ```
-
-   a. From here `DistillationRunner` has no `__init__`, so `OnPolicyRunner.__init__`
-
-   b. [Line 39-40](../../../isaac-sim/kit/python/lib/python3.11/site-packages/rsl_rl/runners/on_policy_runner.py#L39-L40) of `on_policy_runner.py`:
+   b. `on_policy_runner.py` resolves the algorithm:
 
       ```python
       alg_class: type[PPO] = resolve_callable(self.cfg["algorithm"]["class_name"])
       self.alg = alg_class.construct_algorithm(obs, self.env, self.cfg, self.device)
       ```
 
-      1. Since `cfg["algorithm"]["class_name"] == "Distillation"`, it then calls `Distilation.construct_algorithm()` in `distillation.py`. The only thing that changes from the MLP case is the **student** config: the recurrent variant sets `student = RslRlRNNModelCfg(..., rnn_type="lstm")`, whose `class_name == "RNNModel"`. So in `construct_algorithm()`, a new student of type **RNNModel** (an LSTM wrapper that holds a hidden state `h`/`c`) is randomly initialised. The **teacher stays an MLP**, since it is the frozen Phase-1 actor.
-      2. [Line 238-240](../../../isaac-sim/kit/python/lib/python3.11/site-packages/rsl_rl/algorithms/distillation.py#L238-L240):
-
-         ```python
-         alg_class: type[Distillation] = resolve_callable(cfg["algorithm"].pop("class_name"))
-         student_class: type[RNNModel] = resolve_callable(cfg["student"].pop("class_name"))  # "RNNModel"
-         teacher_class: type[MLPModel] = resolve_callable(cfg["teacher"].pop("class_name"))
-         ```
-
-      3. [Lines 254-270](../../../isaac-sim/kit/python/lib/python3.11/site-packages/rsl_rl/algorithms/distillation.py#L254-L270) initialise the Student, Teacher, followed by RolloutStorage, and the Distillation object which is the `self.alg`
-
-3. [Line 217](../robot_lab/scripts/reinforcement_learning/rsl_rl/train.py#L217):
-
-   ```python
-   runner.load(resume_path)
-   ```
-
-   a. This calls `OnPolicyRunner.load()` in [Line 145](../../../isaac-sim/kit/python/lib/python3.11/site-packages/rsl_rl/runners/on_policy_runner.py#L145), which calls Distillation algorithm's `load()` function, in [Line 158](../../../isaac-sim/kit/python/lib/python3.11/site-packages/rsl_rl/runners/on_policy_runner.py#L158):
-
-      ```python
-      load_iteration = self.alg.load(loaded_dict, load_cfg, strict)
-      ```
-
-      1. The objective of this line is to load the teacher
-      2. NOTE: By default, when student is trained from scratch, `load_cfg = None`, and `distillation.py` will leave the random student initialised earlier, untouched.
-      3. BUT, if training from existing, student, `load_cfg` must be set before `runner.load()`
-
-         So, `load_cfg` just loads student in as warm_start, setting "student" as True.
-
-4. [Line 224](../robot_lab/scripts/reinforcement_learning/rsl_rl/train.py#L224):
-
-   ```python
-   runner.learn(num_learning_iterations=agent_cfg.max_iterations, init_at_random_ep_len=True)
-   ```
-
-   a. Overriden by `distillation_runner.py`, the one method it overrides. Which just acts as a guard to check whether teacher is loaded.
-
-   b. [Line 66](../../../isaac-sim/kit/python/lib/python3.11/site-packages/rsl_rl/runners/on_policy_runner.py#L66) in `on_policy_runner` calls `train_mode()`, which is called on `distillation.py` as well:
-
-      ```python
-      self.alg.train_mode()
-      ```
-
-      1. On `distillation.py`, student is set to train, and teacher is set to eval, [Line 169-174](../../../isaac-sim/kit/python/lib/python3.11/site-packages/rsl_rl/algorithms/distillation.py#L169-L174):
-
-         ```python
-         def train_mode(self) -> None:
-             """Set train mode for the student and keep the teacher in eval mode."""
-             self.student.train()
-             # Teacher is always in eval mode
-             self.teacher.eval()
-         ```
-
-   c. [Line 76 – 105](../../../isaac-sim/kit/python/lib/python3.11/site-packages/rsl_rl/runners/on_policy_runner.py#L76-L105) is the entire training process.
-
-      ```python
-      # Start training
-      start_it = self.current_learning_iteration
-      total_it = start_it + num_learning_iterations
-      for it in range(start_it, total_it):
-          start = time.time()
-          # Rollout
-          with torch.inference_mode():
-              for _ in range(self.cfg["num_steps_per_env"]):
-                  # Sample actions
-                  actions = self.alg.act(obs)
-                  # Step the environment
-                  obs, rewards, dones, extras = self.env.step(actions.to(self.env.device))
-                  # Check for NaN values from the environment
-                  if self.cfg.get("check_for_nan", True):
-                      check_nan(obs, rewards, dones)
-                  # Move to device
-                  obs, rewards, dones = (obs.to(self.device), rewards.to(self.device), dones.to(self.device))
-                  # Process the step
-                  self.alg.process_env_step(obs, rewards, dones, extras)
-                  # Extract intrinsic rewards if RND is used (only for logging)
-                  intrinsic_rewards = self.alg.intrinsic_rewards if self.cfg["algorithm"]["rnd_cfg"] else None
-                  # Book keeping
-                  self.logger.process_env_step(rewards, dones, extras, intrinsic_rewards)
-
-          stop = time.time()
-          collect_time = stop - start
-          start = stop
-          # Compute returns
-          self.alg.compute_returns(obs)
-      ```
-
-   d. Subsequently in [line 108](../../../isaac-sim/kit/python/lib/python3.11/site-packages/rsl_rl/runners/on_policy_runner.py#L108), the `update()` function from earlier is called, which does the main loss calculation and backprop.
-
-      ```python
-      # Update policy
-      loss_dict = self.alg.update()
-      ```
-
-> **What actually differs from the MLP run:** `act()`, the rollout loop, and `update()` are the *same generic code*. With the LSTM student the hidden-state machinery inside them (`student.reset(...)`, `detach_hidden_state(...)`, and the `gradient_length`-windowed TBPTT) stops being a no-op and starts carrying/cutting the `h`/`c` state across timesteps. The recurrent config also retunes the algorithm for this: `gradient_length = 24` (widen the TBPTT window to the full rollout so the student integrates a gait cycle of history for velocity inference) and `max_grad_norm = 1.0` (clip BPTT gradients that would otherwise explode through the unrolled LSTM). See [Teacher-Student Distillation Training](#121-teacher-student-distillation-training) and the [RSL-RL DAgger `update()`](#1223-rsl-rl-implementation-dagger) walkthrough for the hidden-state calls.
-
-</details>
-
-### 13.4 Multi-Expert Distillation (LSTM Student)
-
-<details>
-<summary>Click to expand the multi-expert LSTM student walkthrough</summary>
-
-This is the run from [Section 5.6](#56-multi-expert-terrain): one LSTM student distilled from **N frozen MLP experts** at once, each env supervised by the expert matching its terrain. The student is identical to [Section 13.3](#133-distillation-lstm-student); only the **algorithm** changes - `MultiTeacherDistillation` (a subclass of RSL-RL `Distillation`) holds N teachers instead of one and routes supervision per env. From `train.py`,
-
-1. [Line 88](../robot_lab/scripts/reinforcement_learning/rsl_rl/train.py#L88): Note `DistillationRunner` is just there to act as guard for <u>point 4</u>
-
-   ```python
-   from rsl_rl.runners import DistillationRunner, OnPolicyRunner
-   ```
-
-2. [Line 207-208](../robot_lab/scripts/reinforcement_learning/rsl_rl/train.py#L207-L208):
-
-   ```python
-   runner = DistillationRunner(env, agent_cfg.to_dict(), log_dir=log_dir, device=agent_cfg.device)
-   ```
-
-   a. From here `DistillationRunner` has no `__init__`, so `OnPolicyRunner.__init__`
-
-   b. [Line 39-40](../../../isaac-sim/kit/python/lib/python3.11/site-packages/rsl_rl/runners/on_policy_runner.py#L39-L40) of `on_policy_runner.py`:
-
-      ```python
-      alg_class: type[PPO] = resolve_callable(self.cfg["algorithm"]["class_name"])
-      self.alg = alg_class.construct_algorithm(obs, self.env, self.cfg, self.device)
-      ```
-
-      1. The difference starts here. `cfg["algorithm"]["class_name"]` is **not** the plain `"Distillation"` - it is the dotted path `robot_lab...multiteacher.MultiTeacherDistillation` (set by `rsl_rl_multiexpert_distillation_cfg.py`). So `resolve_callable` imports our subclass and calls [`MultiTeacherDistillation.construct_algorithm()`](../robot_lab/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/distillation/multiteacher.py#L77-L117) instead of the stock one.
-      2. As in [Section 13.3](#133-distillation-lstm-student), the **student** is an `RNNModel` (LSTM, holds hidden state `h`/`c`) and the **teacher** class is the MLP actor. But the teachers are loaded *here*, from the env cfg, not from a single `--load_run` checkpoint - [`multiteacher.py` line 86-103](../robot_lab/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/distillation/multiteacher.py#L86-L103):
+      1. `cfg["algorithm"]["class_name"]` is **not** the plain `"Distillation"` - it is the dotted path `robot_lab...multiteacher.MultiTeacherDistillation` (set by `rsl_rl_multiexpert_distillation_cfg.py`). So `resolve_callable` imports our subclass and calls [`MultiTeacherDistillation.construct_algorithm()`](../robot_lab/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/distillation/multiteacher.py#L77-L117).
+      2. The **student class** is also a dotted path - `...cnn_rnn_model.CNNRNNModel`, not the stock `RNNModel`. The **teacher class** stays the MLP actor, since it is the frozen PPO actor. Teachers are loaded *here*, from the env cfg, not from a single `--load_run` checkpoint - [`multiteacher.py` line 86-103](../robot_lab/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/distillation/multiteacher.py#L86-L103):
 
          ```python
          env_cfg = env.unwrapped.cfg
@@ -3099,7 +3109,7 @@ This is the run from [Section 5.6](#56-multi-expert-terrain): one LSTM student d
        runner.load(resume_path)
    ```
 
-   a. **This branch is skipped.** `agent_cfg.algorithm.class_name` is the dotted `MultiTeacherDistillation` path, not the literal `"Distillation"`, and `resume` is False on a fresh run. So `runner.load()` is **not** called and `--load_run` is not required - the teachers were already loaded inside `construct_algorithm()` in <u>point 2b</u>. (Contrast [Section 13.3](#133-distillation-lstm-student) point 3, where the single teacher is loaded via `runner.load()`.)
+   a. **This branch is skipped.** `agent_cfg.algorithm.class_name` is the dotted `MultiTeacherDistillation` path, not the literal `"Distillation"`, and `resume` is False on a fresh run. So `runner.load()` is **not** called and `--load_run` is not required - the teachers were already loaded inside `construct_algorithm()` in <u>point 2b</u>.
 
 4. [Line 224](../robot_lab/scripts/reinforcement_learning/rsl_rl/train.py#L224):
 
@@ -3109,7 +3119,7 @@ This is the run from [Section 5.6](#56-multi-expert-terrain): one LSTM student d
 
    a. Overriden by `distillation_runner.py`, the one method it overrides. Which just acts as a guard to check whether teacher is loaded (here `self.teacher_loaded = True` is set in the constructor, so the guard passes).
 
-   b. [Line 66](../../../isaac-sim/kit/python/lib/python3.11/site-packages/rsl_rl/runners/on_policy_runner.py#L66) in `on_policy_runner` calls `train_mode()`, overridden in [`multiteacher.py` line 56-59](../robot_lab/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/distillation/multiteacher.py#L56-L59) to put the student in train and **every** teacher in eval:
+   b. `on_policy_runner` calls `train_mode()`, overridden in [`multiteacher.py` line 56-59](../robot_lab/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/distillation/multiteacher.py#L56-L59) to put the student in train and **every** teacher in eval:
 
       ```python
       def train_mode(self) -> None:
@@ -3118,7 +3128,7 @@ This is the run from [Section 5.6](#56-multi-expert-terrain): one LSTM student d
               t.eval()
       ```
 
-   c. [Line 76 - 105](../../../isaac-sim/kit/python/lib/python3.11/site-packages/rsl_rl/runners/on_policy_runner.py#L76-L105) is the entire training process - the *same generic loop* as PPO/Distillation. The only methods that change are the two it calls, both overridden in `multiteacher.py`:
+   c. The rollout loop is the *same generic loop* as PPO/Distillation. The only methods that change are the two it calls, both overridden in `multiteacher.py`:
 
       1. `act()` ([line 38-44](../robot_lab/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/distillation/multiteacher.py#L38-L44)) - the student acts as usual, but the supervision target is **gathered per env** from the matching expert. All N teachers run on the full obs, then `expert_ids` selects each env's column:
 
@@ -3132,7 +3142,9 @@ This is the run from [Section 5.6](#56-multi-expert-terrain): one LSTM student d
              return self.transition.actions
          ```
 
-      2. `process_env_step()` ([line 46-54](../robot_lab/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/distillation/multiteacher.py#L46-L54)) - stores the transition and resets hidden state on `dones` for the student **and every teacher** (same LSTM hidden-state machinery as [Section 13.3](#133-distillation-lstm-student), now looped over all experts):
+         `E` is the expert count, `N` the env count, `A` the action dimension (16). Every teacher runs on every env and all but the selected row is discarded - wasteful in compute, trivially vectorised, and free when one expert is active.
+
+      2. `process_env_step()` ([line 46-54](../robot_lab/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/distillation/multiteacher.py#L46-L54)) - stores the transition and resets hidden state on `dones` for the student **and every teacher**:
 
          ```python
          self.student.reset(dones)
@@ -3140,14 +3152,28 @@ This is the run from [Section 5.6](#56-multi-expert-terrain): one LSTM student d
              t.reset(dones)
          ```
 
-   d. Subsequently in [line 108](../../../isaac-sim/kit/python/lib/python3.11/site-packages/rsl_rl/runners/on_policy_runner.py#L108), the inherited `update()` runs the MSE loss between student actions and the per-env `privileged_actions`, then backprops - identical to [Section 13.3](#133-distillation-lstm-student), including the `gradient_length = 24` TBPTT window and `max_grad_norm = 1.0` clipping.
+   d. The inherited `update()` then runs the MSE loss between student actions and the per-env `privileged_actions` and backprops, with the `gradient_length = 24` TBPTT window and `max_grad_norm = 1.0` clipping.
 
       ```python
       # Update policy
       loss_dict = self.alg.update()
       ```
 
-5. On save, `save()` ([line 66-75](../robot_lab/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/distillation/multiteacher.py#L66-L75)) writes the `student_state_dict` plus a per-expert `teacher_<i>_state_dict`, and keeps a plain `teacher_state_dict` (= teacher 0) so the stock single-teacher loader and `play.py` stay happy:
+      Define the terms before the equation: $b$ indexes the batch of (env, timestep) pairs, size $B$; $j$ indexes the action dimension, $A = 16$; $a^{\text{student}}_{b,j}$ is the student's action; $a^{\text{target}}_{b,j}$ is the action of the teacher selected by env $b$'s expert id; the averaging operation is a plain mean over both indices.
+
+      $$L = \frac{1}{B \cdot A} \sum_{b=1}^{B} \sum_{j=1}^{A} \left( a^{\text{student}}_{b,j} - a^{\text{target}}_{b,j} \right)^2$$
+
+      This is `loss_type="mse"`. Nothing weights the experts against each other: each sample has exactly one target.
+
+> **Why this is DAgger-*style*, not DAgger.** The student visits its own states (point 4c1), which is
+> the property that collapses behaviour cloning's $O(T^2\epsilon)$ compounding to $O(T\epsilon)$. But
+> this code does **not** build a persistent aggregated dataset and retrain on it - `update()` ends
+> with `self.storage.clear()`, so each rollout is used for `num_learning_epochs = 2` and discarded.
+> See [Section 12.2.3](#1223-rsl-rl-implementation-dagger).
+
+#### 13.2.7 Checkpoint behavior
+
+5. On save, `save()` ([line 66-75](../robot_lab/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/distillation/multiteacher.py#L66-L75)) writes the `student_state_dict` plus a per-expert `teacher_<i>_state_dict`, and keeps a plain `teacher_state_dict` (= teacher 0) so the stock single-teacher loader stays happy:
 
    ```python
    saved = {
@@ -3159,26 +3185,43 @@ This is the run from [Section 5.6](#56-multi-expert-terrain): one LSTM student d
        saved[f"teacher_{i}_state_dict"] = t.state_dict()
    ```
 
-> **What actually differs from the single-teacher LSTM run ([Section 13.3](#133-distillation-lstm-student)):** the runner, rollout loop, and `update()` are unchanged. Only the algorithm swaps to `MultiTeacherDistillation`, which (i) loads N MLP teachers from `teachers.txt` inside `construct_algorithm()` instead of one via `runner.load()` - so the `train.py` load branch is skipped and `--load_run` is not needed, (ii) builds a `[num_envs]` `expert_ids` map from the terrain columns, and (iii) in `act()`/`process_env_step()`/`save()` routes the supervision target per env and resets/saves every teacher. The student and its LSTM hidden-state handling are exactly as in Section 13.3. See [Section 5.6](#56-multi-expert-terrain) for how `teachers.txt` builds the combined terrain and `column_to_expert` map.
+Two consequences:
+
+- Loading this checkpoint needs `DistillationRunner` plus a student-keyed `load_cfg`. The plain PPO
+  path looks for `actor_state_dict` and will either raise `KeyError` or silently leave a randomly
+  initialised student in place.
+- **A saved checkpoint is not proof of export compatibility.** Training writes checkpoints happily;
+  export is a separate capability that does not exist for this model.
+
+#### 13.2.8 Current limitations
+
+| Capability | Status |
+|---|---|
+| **TorchScript (JIT) export** | **Not implemented.** `CNNRNNModel.as_jit()` raises `NotImplementedError` - the stock CNN and RNN exporters each handle only one modality |
+| **ONNX export** | **Not implemented.** `CNNRNNModel.as_onnx()` raises `NotImplementedError` |
+| **Normal `play.py`** | **Blocked.** [play.py:218-224](../robot_lab/scripts/reinforcement_learning/rsl_rl/play.py#L218-L224) exports before the simulation loop at line 250, so it raises before rendering a frame |
+| **C++ depth capture and preprocessing** | **Not implemented.** The controller has no camera input, no `DepthImageDR` equivalent, and no image tensor inputs |
+| **Depth-student sim2sim** | **Not validated.** Requires export plus the C++ work above |
+| **Depth-student sim2real** | **Not validated.** Same prerequisites |
+| **Per-teacher evaluation via the older task configs** | **Not architecture compatible.** See [Section 4.6](#46-step-2a---evaluate-policies-per-level-evaluation-csv) |
+
+> **Read this block before carrying a checkpoint anywhere.** A training checkpoint for this model is
+> valid and loadable, and it still cannot reach any deployment interface in this repository. The
+> current depth path stops at **training and checkpoint inspection**. Closing it requires, at
+> minimum: a stateful CNN+LSTM export wrapper; a matching C++ runtime that captures both cameras,
+> reproduces the preprocessing, and carries LSTM state; and a validated export → load → inference
+> test.
+
+> **What actually differs from the plain single-teacher LSTM run:** the runner, the rollout loop, and
+> `update()` are unchanged generic code. What changes is (i) the **algorithm** - `MultiTeacherDistillation`
+> loads N MLP teachers from `teachers.txt` inside `construct_algorithm()` instead of one via
+> `runner.load()`, so the `train.py` load branch is skipped and `--load_run` is not needed; (ii) the
+> **environment** - two depth cameras and the `student` / `student_commands` / `depth_front` /
+> `depth_rear` groups are added; (iii) the **student model** - `CNNRNNModel` (per-camera CNN encoders
+> + 2-layer LSTM + command-bypass head) replaces the stock one-layer `RNNModel`; and (iv) `act()` /
+> `process_env_step()` / `save()` route supervision per env and reset/save every teacher. See
+> [Section 5.6](#56-multi-expert-terrain) for how `teachers.txt` builds the combined terrain and
+> `column_to_expert` map.
 
 </details>
-
-### 13.5 RL Fine-Tuning (PPO, warm-started LSTM actor)
-
-<details>
-<summary>Click to expand the Stage-3 PPO fine-tuning walkthrough</summary>
-
-Stage 3 is registered as `RobotLab-Isaac-Velocity-MultiExpert-Finetune-Unitree-B2W-v0`. The runner is a normal `RslRlOnPolicyRunnerCfg`, but its algorithm `class_name` points at [`FinetunePPO`](../robot_lab/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/finetune/finetune_ppo.py), so `PPO.construct_algorithm()` is replaced without editing `train.py`.
-
-`FinetunePPO.construct_algorithm()` builds the recurrent actor, privileged critic, obs groups, RND/symmetry config, and `RolloutStorage` the same way stock PPO does. The one added step is loading `env.unwrapped.cfg.student_checkpoint` and applying `actor.load_state_dict(sd["student_state_dict"], strict=True)`, which turns the distilled LSTM student into the PPO actor. The actor architecture in [`rsl_rl_multiexpert_finetune_cfg.py`](../robot_lab/source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/wheeled/unitree_b2w/agents/rsl_rl_multiexpert_finetune_cfg.py) matches the Stage-2 student byte-for-byte.
-
-`train.py` still skips its `runner.load()` branch on a fresh run because `resume=False` and the algorithm class is the dotted `FinetunePPO` path, not the literal `Distillation`. That keeps the warm-start local to `construct_algorithm()` and avoids needing `--load_run`.
-
-During `update()`, the actor parameters stay frozen for `freeze_actor_iters` updates so the privileged critic can learn values for the distilled policy before policy gradients perturb it. When the counter reaches the warmup limit, the actor is unfrozen and the optimizer LR is reset to the configured base LR, undoing adaptive-KL drift from the frozen period.
-
-The output checkpoint is a standard PPO checkpoint with `actor_state_dict`, `critic_state_dict`, and `optimizer_state_dict`. That means `play.py`, ONNX export, and the recurrent deployment runner treat the fine-tuned policy like any other PPO actor. The auto-wiring is contained in four files: `mdp/finetune/finetune_ppo.py`, `multiexpert_finetune_env_cfg.py`, `agents/rsl_rl_multiexpert_finetune_cfg.py`, and the B2W task registration in `__init__.py`.
-
-</details>
-
-
 ---

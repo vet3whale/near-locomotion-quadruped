@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 909 880" width="909" height="880" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#9aa4b6"/>
+    </marker>
+  </defs>
+
+  <!-- panel -->
+  <rect x="4" y="4" width="901" height="872" rx="16" fill="#0e1014" stroke="#2a2d36" stroke-width="1.5"/>
+
+  <!-- edges (drawn first, under boxes) -->
+  <g stroke="#9aa4b6" stroke-width="2" fill="none" marker-end="url(#arrow)">
+    <!-- front depth column -->
+    <line x1="143" y1="130" x2="143" y2="198"/>
+    <line x1="143" y1="272" x2="143" y2="328"/>
+    <line x1="143" y1="402" x2="143" y2="466"/>
+    <!-- rear depth column -->
+    <line x1="349" y1="130" x2="349" y2="198"/>
+    <line x1="349" y1="272" x2="349" y2="328"/>
+    <line x1="349" y1="402" x2="349" y2="466"/>
+    <!-- proprio into LSTM -->
+    <line x1="505" y1="130" x2="505" y2="466"/>
+    <!-- proprio skip to head -->
+    <line x1="618" y1="130" x2="618" y2="643"/>
+    <!-- commands bypass to head -->
+    <line x1="760" y1="130" x2="760" y2="643"/>
+    <!-- LSTM to head -->
+    <line x1="330" y1="544" x2="330" y2="643"/>
+    <!-- head to actions -->
+    <line x1="483" y1="721" x2="483" y2="754"/>
+  </g>
+
+  <!-- edge labels -->
+  <g fill="#aab0be" font-size="13">
+    <text x="153" y="440">64</text>
+    <text x="359" y="440">64</text>
+    <text x="515" y="300">57</text>
+    <text x="628" y="404">57 skip</text>
+    <text x="770" y="560">3 bypass</text>
+    <text x="340" y="600">256</text>
+  </g>
+
+  <!-- ===== boxes ===== -->
+  <!-- row 1: inputs -->
+  <g>
+    <rect x="57"  y="58" width="172" height="72" rx="9" fill="#4b3fb0" stroke="#6f64d6" stroke-width="1.5"/>
+    <rect x="263" y="58" width="172" height="72" rx="9" fill="#4b3fb0" stroke="#6f64d6" stroke-width="1.5"/>
+    <rect x="469" y="58" width="172" height="72" rx="9" fill="#16795f" stroke="#2fae87" stroke-width="1.5"/>
+    <rect x="674" y="58" width="172" height="72" rx="9" fill="#8a5a10" stroke="#c08a24" stroke-width="1.5"/>
+  </g>
+  <!-- row 2: CNN -->
+  <g>
+    <rect x="57"  y="200" width="172" height="72" rx="9" fill="#41368f" stroke="#6154be" stroke-width="1.5"/>
+    <rect x="263" y="200" width="172" height="72" rx="9" fill="#41368f" stroke="#6154be" stroke-width="1.5"/>
+  </g>
+  <!-- row 3: per-image FC -->
+  <g>
+    <rect x="57"  y="330" width="172" height="72" rx="9" fill="#41368f" stroke="#6154be" stroke-width="1.5"/>
+    <rect x="263" y="330" width="172" height="72" rx="9" fill="#41368f" stroke="#6154be" stroke-width="1.5"/>
+  </g>
+  <!-- row 4: LSTM -->
+  <rect x="57" y="468" width="533" height="76" rx="9" fill="#3c3c46" stroke="#5c5c68" stroke-width="1.5"/>
+  <!-- row 5: head MLP -->
+  <rect x="205" y="645" width="555" height="76" rx="9" fill="#3c3c46" stroke="#5c5c68" stroke-width="1.5"/>
+  <!-- row 6: actions -->
+  <rect x="356" y="756" width="254" height="72" rx="9" fill="#3a6b1e" stroke="#549a30" stroke-width="1.5"/>
+
+  <!-- ===== labels ===== -->
+  <g fill="#f3f3f7" font-size="18" font-weight="600" text-anchor="middle">
+    <text x="143" y="92">Front depth</text>
+    <text x="349" y="92">Rear depth</text>
+    <text x="555" y="92">Proprio</text>
+    <text x="760" y="92">Commands</text>
+    <text x="143" y="234">CNN encoder</text>
+    <text x="349" y="234">CNN encoder</text>
+    <text x="143" y="364">Per-image FC</text>
+    <text x="349" y="364">Per-image FC</text>
+    <text x="323" y="503">2-layer LSTM</text>
+    <text x="482" y="680">Head MLP</text>
+    <text x="483" y="789">Actions: 16</text>
+  </g>
+  <g fill="#c3c7d3" font-size="13" text-anchor="middle">
+    <text x="143" y="114">camera 1</text>
+    <text x="349" y="114">camera 2</text>
+    <text x="555" y="114">57 dims</text>
+    <text x="760" y="114">3: vx, vy, wz</text>
+    <text x="143" y="256">3 conv + pool</text>
+    <text x="349" y="256">3 conv + pool</text>
+    <text x="143" y="386">128 to 64</text>
+    <text x="349" y="386">128 to 64</text>
+    <text x="323" y="525">input 185, hidden 256</text>
+    <text x="482" y="702">316 in, hidden 256, 128, 128</text>
+  </g>
+  <g fill="#d6ecc6" font-size="13" text-anchor="middle">
+    <text x="483" y="811">12 leg pos + 4 wheel vel</text>
+  </g>
+</svg>
