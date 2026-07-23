@@ -51,9 +51,9 @@ RL policy trained in `robot_lab` --> exported to ONNX via `play.py` --> C++ cont
   </ul></details></li>
   <li><details><summary><a href="#6-evaluation-matrix">6. Evaluation Matrix</a></summary><ul>
     <li><a href="#61-command">6.1 Command</a></li>
-    <li><a href="#63-evaluation-settings">6.3 Evaluation Settings</a></li>
-    <li><a href="#64-what-the-csv-records">6.4 What the CSV Records</a></li>
-    <li><a href="#65-files-and-reasoning">6.5 Files and Reasoning</a></li>
+    <li><a href="#62-evaluation-settings">6.2 Evaluation Settings</a></li>
+    <li><a href="#63-what-the-csv-records">6.3 What the CSV Records</a></li>
+    <li><a href="#64-files-and-reasoning">6.4 Files and Reasoning</a></li>
   </ul></details></li>
   <li><details><summary><a href="#7-skills-trained-on">7. Skills Trained On</a></summary><ul>
     <li><a href="#71-successfully-trained-on">7.1 Successfully trained on</a></li>
@@ -157,7 +157,7 @@ near-locomotion-quadruped/
 ### 2.1 System Container Was Tested On
 
 <details>
-<summary><strong>Containter was tested in the following system:</strong></summary>
+<summary><strong>Container was tested in the following system:</strong></summary>
 
 | Component | Spec |
 |---|---|
@@ -179,7 +179,7 @@ near-locomotion-quadruped/
 
 ### 2.2 What the Container Downloads
 
-The Dockerfile pulls the following during `docker build`. Plan for a large first build (~30–40 GB total download).
+The Dockerfile pulls the following during `docker build`. Plan for a large first build (~30-40 GB total download).
 
 <details>
 <summary><strong>Container downloads the following:</strong></summary>
@@ -552,7 +552,7 @@ keyboard_transitions:
 
 | Action | Why |
 |---|---|
-| Added a generic observation [`joint_pos_rel_without_wheel`](../unitree_rl_lab/deploy/include/isaaclab/envs/mdp/observations/observations.h#L90) between `joint_pos_rel` and `joint_vel_rel` (code below); wheel indices are read from `deploy.yaml`. | The B2W policy was trained with `joint_pos_rel_without_wheel`: a 16-element `q - q_default` vector where the four wheel slots [12–15] are forced to 0.0 - wheel is only velocity controlled not position controlled. |
+| Added a generic observation [`joint_pos_rel_without_wheel`](../unitree_rl_lab/deploy/include/isaaclab/envs/mdp/observations/observations.h#L90) between `joint_pos_rel` and `joint_vel_rel` (code below); wheel indices are read from `deploy.yaml`. | The B2W policy was trained with `joint_pos_rel_without_wheel`: a 16-element `q - q_default` vector where the four wheel slots [12-15] are forced to 0.0 - wheel is only velocity controlled not position controlled. |
 
 <details>
 <summary><strong>Click to expand CPP snippet</strong></summary>
@@ -813,7 +813,7 @@ wandb login
 setup_isaaclab
 cd /workspace/near-locomotion-quadruped/robot_lab
 python scripts/reinforcement_learning/rsl_rl/train.py \
-  --task=RobotLab-Isaac-Velocity-Rough-Unitree-B2W-v0 \
+  --task=RobotLab-Isaac-Velocity-Rough-Unitree-B2W-v1 \
   --headless --max_iterations 5000 \
   --logger wandb \
   --log_project_name b2w-rough-v1
@@ -1367,7 +1367,7 @@ At the start of training, each of the 4096 environments is assigned a **random s
 self.terrain_levels = torch.randint(0, max_init_level + 1, (num_envs,), device=self.device)
 ```
 
-`max_init_terrain_level = 5` (for `rough_env_cfg.py` only) is set in the scene config, so no robot starts on the hardest half of the terrain grid. The upper levels (6–9) are unlocked only through earned progression during training.
+`max_init_terrain_level = 5` (for `rough_env_cfg.py` only) is set in the scene config, so no robot starts on the hardest half of the terrain grid. The upper levels (6-9) are unlocked only through earned progression during training.
 
 #### Progression and regression at each episode end
 
@@ -1419,7 +1419,7 @@ A robot that beats the hardest level (row 9) is sent to a **random level** rathe
 
 ```
 Initialisation
-  └─ Each of 4096 envs assigned random terrain level 0–5
+  └─ Each of 4096 envs assigned random terrain level 0-5
 
 Every episode step
   └─ Actor observes robot state → outputs joint targets
@@ -1807,7 +1807,7 @@ Useful options:
 | `--duration_s` | Optional rollout length. If omitted, it is chosen from both terrain and robot count. At `512` robots per level, every terrain (StaircaseUp/SlopeUp included) uses `20s`. |
 | `--headless` | Passes headless mode through to `eval_worker.py`. If omitted, the Isaac window can be shown so you can watch the evaluation. |
 
-### 6.3 Evaluation Settings
+### 6.2 Evaluation Settings
 
 `evaluation.py` uses `eval_worker.py` internally to make each rollout a controlled, repeatable measurement:
 
@@ -1833,7 +1833,7 @@ Useful options:
 >                 -> 0.04 + 0.234  
 >                 -> 0.274 m  
 
-### 6.4 What the CSV Records
+### 6.3 What the CSV Records
 
 The orchestrator launches `eval_worker.py` once per compatible `(policy, terrain)` pair. `eval_worker.py` places robots evenly across terrain levels and writes **two** CSVs per run.
 
@@ -1869,7 +1869,7 @@ summary_success_rate = (cleared_1 + cleared_2 + ... + cleared_9) / (512 * 9)
 
 > Note: the summative rate is a flat average over every robot in the sweep. With the default `EVAL_DIFFICULTY_RANGE=(0.9, 0.9)` every level row runs at a fixed `0.9` of the trained max, so the single number reflects performance just below the hardest training terrain.
 
-### 6.5 Files and Reasoning
+### 6.4 Files and Reasoning
 
 **Orchestrator:** `scripts/evaluation/evaluation.py`
 
@@ -2814,7 +2814,7 @@ From `train.py`,
 
          Note that the `train()` method here is from MLP library
 
-   b. Line 76 – 105 is the entire training process.
+   b. Line 76 - 105 is the entire training process.
 
       ```python
       # Start training
