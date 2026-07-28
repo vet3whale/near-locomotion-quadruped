@@ -28,11 +28,12 @@
 
 - [3.1 Step 1 - Train Teacher in Isaac Lab](#31-step-1---train-teacher-in-isaac-lab)
 - [3.2 Step 1b - Watch the Robot Walk in Isaac Sim](#32-step-1b---watch-the-robot-walk-in-isaac-sim)
-- [3.3 Step 1c - Distillation (Student-Teacher)](#33-step-1c---distillation-student-teacher)
-- [3.4 Step 2 - Export to ONNX](#34-step-2---export-to-onnx)
-- [3.5 Step 3 - Sim2Sim in MuJoCo](#35-step-3---sim2sim-in-mujoco)
-- [3.6 Step 3b - Generate rough terrain](#36-step-3b---generate-rough-terrain)
-- [3.7 Step 4 - Sim2Real (to be tested)](#37-step-4---sim2real-to-be-tested)
+- [3.3 Step 1c - Distillation + RL Fine-Tuning](#33-step-1c---distillation--rl-fine-tuning)
+- [3.4 Step 1d - Evaluation](#34-step-1d---evaluation)
+- [3.5 Step 2 - Export to ONNX](#35-step-2---export-to-onnx)
+- [3.6 Step 3 - Sim2Sim in MuJoCo](#36-step-3---sim2sim-in-mujoco)
+- [3.7 Step 3b - Generate rough terrain](#37-step-3b---generate-rough-terrain)
+- [3.8 Step 4 - Sim2Real (to be tested)](#38-step-4---sim2real-to-be-tested)
 
 </details>
 
@@ -169,7 +170,7 @@ robot_lab/logs/rsl_rl/<experiment_name>/<latest-timestamp>/exported/policy.onnx
 
 **IMPORTANT**: Set which policy the controller deploys (for sim2sim or sim2real) by opening `unitree_rl_lab/deploy/robots/b2w/config/config.yaml` and editing `policy_dir` to point at the log root of the run you want.   
 `parser_policy_dir` function in controller automatically finds most recent timestamp subdirectory that contains an `exported/` folder and loads `policy.onnx` from it.  
-See [Step 2 - Export to ONNX](#34-step-2---export-to-onnx) to generate `.onnx` file from a `.pt` checkpoint.
+See [Step 2 - Export to ONNX](#35-step-2---export-to-onnx) to generate `.onnx` file from a `.pt` checkpoint.
 
 ### 2.2 Prerequisite Installation
 
@@ -426,7 +427,7 @@ action spaces match and the `v1` weights load directly.
 
 </details>
 
-### 3.3 Step 1c - Distillation (Student-Teacher)
+### 3.3 Step 1c - Distillation + RL Fine-Tuning
 
 Distillation trains one **student** to copy one or more privileged PPO **teachers**, using MSE loss
 on the student's own on-policy rollouts.
@@ -594,7 +595,45 @@ python scripts/reinforcement_learning/rsl_rl/play.py \
 
 </details>
 
-### 3.4 Step 2 - Export to ONNX
+### 3.4 Step 1d - Evaluation
+
+Score a policy the way the paper's Table 4 does: 1000 robots, one fixed velocity command, terrain
+randomized at 90% of max training difficulty. A robot succeeds if it covers 4 m along the command
+without falling. A run takes about a minute.
+
+```bash
+setup_isaaclab
+cd /workspace/near-locomotion-quadruped/robot_lab
+python scripts/evaluation/evaluate.py --policy student_finetune
+```
+
+Four flags, all optional except `--policy`:
+
+| Flag | Values | Default |
+| --- | --- | --- |
+| `--policy` | `expert`, `student`, `student_finetune`, or a path to a `model_*.pt` | required |
+| `--terrain` | `finetune`, `rough_v1`, `rough_v0` | `finetune` |
+| `--num_envs` | robots to roll out | `1000` |
+| `--gui` | watch it instead of running headless | off |
+
+All three policies run in the same environment, so the numbers compare directly. Each run prints
+the success rate and appends a row to `evaluation_table.csv`.
+
+```bash
+# the full comparison
+python scripts/evaluation/evaluate.py --policy expert && \
+python scripts/evaluation/evaluate.py --policy student && \
+python scripts/evaluation/evaluate.py --policy student_finetune
+```
+
+Success rate in %, 1000 rollouts per cell:
+
+| terrain | expert_success | student_success | student_finetune_success |
+| --- | --- | --- | --- |
+| finetune | 93.3 | 82.8 | 96.1 |
+
+
+### 3.5 Step 2 - Export to ONNX
 
 `play.py` exports on startup, so the same script that plays a policy also writes its `.onnx`. Export
 the fine-tuned student from [Phase 5](#phase-5---ppo-fine-tune-the-student):
@@ -621,7 +660,7 @@ task's own `<experiment_name>`.
 > the previous step's outputs back in and zero them on reset. A feed-forward PPO teacher has no such
 > inputs - anything consuming the student's ONNX has to be written for the recurrent signature.
 
-### 3.5 Step 3 - Sim2Sim in MuJoCo
+### 3.6 Step 3 - Sim2Sim in MuJoCo
 
 > To be updated to accomodate for the depth student.
 
@@ -683,14 +722,14 @@ before you touch a gear key. `q` stops it without leaving Velocity.
 
 > Pressing `x` returns the robot to Passive - it slowly sits down and goes limp.
 
-### 3.6 Step 3b - Generate rough terrain
+### 3.7 Step 3b - Generate rough terrain
 
 Check how to set it up under [B2W MuJoCo Sim2Sim Validation → Terrain Generation](#24-terrain-generation).
 
 > The terrain generator supports: rough ground (random cubes), Perlin heightfield, stairs,
 > floating stairs, arbitrary boxes and geometry.
 
-### 3.7 Step 4 - Sim2Real (to be tested)
+### 3.8 Step 4 - Sim2Real (to be tested)
 
 > **The current depth student cannot be deployed.** The C++ controller has no depth capture, no depth
 > preprocessing, and no image tensor inputs. This section describes the deployment path for the
