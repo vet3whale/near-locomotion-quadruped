@@ -632,6 +632,42 @@ Success rate in %, 1000 rollouts per cell:
 | --- | --- | --- | --- |
 | finetune | 93.3 | 82.8 | 96.1 |
 
+<details>
+<summary><strong>Steps to change expert and evaluate</strong></summary>
+
+Two edits to [`evaluate.py`](../robot_lab/scripts/evaluation/evaluate.py). The new terrain has to
+belong to a registered task, since `TERRAINS` maps names to task ids.
+
+**1. Point the `expert` entry at the new checkpoint:**
+
+```python
+POLICIES = {
+    "expert": (
+        "logs/rsl_rl/unitree_b2w_staircase_teacher/<run>/model_N.pt",
+        "privileged PPO expert trained on staircases",
+    ),
+    ...
+}
+```
+
+**2. Add its terrain:**
+
+```python
+TERRAINS = {
+    "rough_v0": "RobotLab-Isaac-Velocity-Rough-Unitree-B2W-v0",
+    "rough_v1": "RobotLab-Isaac-Velocity-Rough-Unitree-B2W-v1",
+    "finetune": TASK,
+    "staircase": "RobotLab-Isaac-Velocity-Staircase-Teacher-Unitree-B2W-v0",
+}
+```
+
+`--terrain` takes its choices from this dict, so the new name works immediately.
+
+```bash
+python scripts/evaluation/evaluate.py --policy expert --terrain staircase
+```
+
+</details>
 
 ### 3.5 Step 2 - Export to ONNX
 
